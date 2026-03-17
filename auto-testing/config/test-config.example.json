@@ -1,0 +1,13 @@
+{
+  "repos": [
+    "hashiraio/my-frontend-app",
+    "hashiraio/my-backend-api"
+  ],
+  "apiBaseUrls": {
+    "hashiraio/my-backend-api": "https://api.example.com"
+  },
+  "uiBaseUrls": {
+    "hashiraio/my-frontend-app": "https://app.example.com"
+  },
+  "recentReposLimit": 120
+}

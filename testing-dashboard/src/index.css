@@ -1,0 +1,131 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  /* Refined dark theme */
+  --color-bg-canvas: #08090b;
+  --color-bg-primary: #111318;
+  --color-bg-secondary: #0d0f13;
+  --color-bg-elevated: #1a1d24;
+  --color-bg-card: #13161c;
+  --color-bg-hover: #1a1e26;
+  --color-bg-input: #0a0c10;
+  --color-border: #1e2229;
+  --color-border-subtle: #171a20;
+  --color-border-focus: #ff983040;
+  --color-text-primary: #e1e3e6;
+  --color-text-secondary: #8b92a0;
+  --color-text-muted: #555d6e;
+  --color-accent: #ff9830;
+  --color-accent-hover: #ffad57;
+  --color-accent-muted: #ff983020;
+  --color-success: #4ade80;
+  --color-success-muted: #4ade8018;
+  --color-error: #f87171;
+  --color-error-muted: #f8717118;
+  --color-warning: #facc15;
+  --color-warning-muted: #facc1518;
+  --color-info: #60a5fa;
+  --color-info-muted: #60a5fa18;
+  --color-purple: #a78bfa;
+  --color-purple-muted: #a78bfa18;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  background: var(--color-bg-canvas);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2e38;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3f4a;
+}
+
+/* Progress animation */
+@keyframes progress-slide {
+  0%, 100% { transform: translateX(-100%); }
+  50% { transform: translateX(300%); }
+}
+
+.animate-progress-slide {
+  animation: progress-slide 2s ease-in-out infinite;
+}
+
+/* Shimmer for loading states */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 25%, #1a1d2440 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* Glow pulse for live indicators */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Subtle fade-in for sections */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Status dot styles */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover:hover {
+  border-color: #2a2e38;
+  box-shadow: 0 0 0 1px #1e222940;
+}

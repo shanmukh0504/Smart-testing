@@ -1,0 +1,269 @@
+{
+  "kt": {
+    "generated_at": "2026-03-17T15:40:36.197Z",
+    "architecture": "This is a Rust-based cryptocurrency quote and trading service built with Axum web framework. The architecture follows a layered pattern with adapters for external services (exchanges, fiat providers), core domain logic for blockchain operations, strategy matching for order fulfillment, and solver aggregation for liquidity management. It uses async/await patterns throughout, integrates with multiple blockchain networks (Bitcoin, Ethereum, Solana, Starknet, etc.), and provides quote generation with slippage management and order matching capabilities.",
+    "modules": [
+      {
+        "name": "adapters",
+        "description": "External service integration layer containing exchange aggregators, fiat price fetchers, garden store interface, pricing services, and URL parsing utilities",
+        "path": "src/adapters",
+        "last_modified": ""
+      },
+      {
+        "name": "core",
+        "description": "Core domain logic for address validation, chain parsing, and swap ID generation across multiple blockchain networks",
+        "path": "src/core",
+        "last_modified": ""
+      },
+      {
+        "name": "server",
+        "description": "HTTP server implementation with handlers, response formatting, dependency injection, and type definitions for the REST API",
+        "path": "src/server",
+        "last_modified": ""
+      },
+      {
+        "name": "solver",
+        "description": "Solver aggregation system that manages liquidity providers, communication with solver services, and asset liquidity tracking",
+        "path": "src/solver",
+        "last_modified": ""
+      },
+      {
+        "name": "strategy",
+        "description": "Order matching and strategy execution including slippage calculation, quote matching, and strategy management",
+        "path": "src/strategy",
+        "last_modified": ""
+      },
+      {
+        "name": "types",
+        "description": "Core data structures including attested quotes, orderbook types, quote definitions, and blockchain-specific types",
+        "path": "src/types",
+        "last_modified": ""
+      },
+      {
+        "name": "error",
+        "description": "Centralized error handling with custom error types for various failure scenarios in the quote system",
+        "path": "src/error",
+        "last_modified": ""
+      }
+    ],
+    "apis": [
+      {
+        "endpoint": "/health",
+        "method": "GET",
+        "description": "Health check endpoint to verify service availability",
+        "requestBody": {
+          "fields": []
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": \"healthy\" }",
+        "authType": "none"
+      },
+      {
+        "endpoint": "/quote",
+        "method": "POST",
+        "description": "Generate a quote for token swaps with strategy matching and pricing",
+        "requestBody": {
+          "fields": [
+            {
+              "name": "order_pair",
+              "type": "string",
+              "required": true,
+              "description": "Format: source_chain:source_asset::dest_chain:dest_asset"
+            },
+            {
+              "name": "input_amount",
+              "type": "string",
+              "required": false,
+              "description": "Amount of input tokens (for exact input quotes)"
+            },
+            {
+              "name": "output_amount",
+              "type": "string",
+              "required": false,
+              "description": "Amount of output tokens (for exact output quotes)"
+            },
+            {
+              "name": "slippage",
+              "type": "number",
+              "required": false,
+              "description": "Maximum slippage tolerance in basis points"
+            },
+            {
+              "name": "recipient",
+              "type": "string",
+              "required": false,
+              "description": "Destination address for the tokens"
+            }
+          ]
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": { \"input_quote\": { \"asset\": \"string\", \"amount\": \"string\", \"display\": 0.01, \"value\": \"100\" }, \"output_quote\": { \"asset\": \"string\", \"amount\": \"string\", \"display\": 0.01, \"value\": \"100\" }, \"fee\": 100, \"fixed_fee\": \"0.001\", \"strategy_id\": \"string\" } }",
+        "authType": "bearer",
+        "authHeader": "garden-app-id"
+      },
+      {
+        "endpoint": "/quote/v2",
+        "method": "POST",
+        "description": "Enhanced quote generation with additional features and improved response format",
+        "requestBody": {
+          "fields": [
+            {
+              "name": "order_pair",
+              "type": "string",
+              "required": true,
+              "description": "Format: source_chain:source_asset::dest_chain:dest_asset"
+            },
+            {
+              "name": "input_amount",
+              "type": "string",
+              "required": false,
+              "description": "Amount of input tokens"
+            },
+            {
+              "name": "output_amount",
+              "type": "string",
+              "required": false,
+              "description": "Amount of output tokens"
+            },
+            {
+              "name": "slippage",
+              "type": "number",
+              "required": false,
+              "description": "Slippage tolerance in basis points"
+            },
+            {
+              "name": "recipient",
+              "type": "string",
+              "required": false,
+              "description": "Recipient address"
+            },
+            {
+              "name": "integrator_id",
+              "type": "string",
+              "required": false,
+              "description": "Integrator identifier for tracking"
+            }
+          ]
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": { \"quotes\": [{ \"input_quote\": {}, \"output_quote\": {}, \"fee\": 100, \"strategy_id\": \"string\" }], \"slippage_info\": { \"QuoteParams\": 100 } } }",
+        "authType": "bearer",
+        "authHeader": "garden-app-id"
+      },
+      {
+        "endpoint": "/order",
+        "method": "POST",
+        "description": "Create a signed order from a quote with attestation",
+        "requestBody": {
+          "fields": [
+            {
+              "name": "quote",
+              "type": "object",
+              "required": true,
+              "description": "Quote object from previous quote request"
+            },
+            {
+              "name": "recipient",
+              "type": "string",
+              "required": true,
+              "description": "Destination address for tokens"
+            },
+            {
+              "name": "source_recipient",
+              "type": "string",
+              "required": false,
+              "description": "Source chain recipient address"
+            },
+            {
+              "name": "destination_recipient",
+              "type": "string",
+              "required": false,
+              "description": "Destination chain recipient address"
+            }
+          ]
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": { \"order\": { \"id\": \"string\", \"source\": {}, \"destination\": {}, \"additional_data\": {} }, \"signature\": \"hex_string\" } }",
+        "authType": "bearer",
+        "authHeader": "garden-app-id"
+      },
+      {
+        "endpoint": "/usd-price/{order_pair}",
+        "method": "GET",
+        "description": "Get USD prices for both tokens in an order pair",
+        "requiredParams": [
+          {
+            "name": "order_pair",
+            "type": "string",
+            "required": true,
+            "description": "Order pair in format source_asset::dest_asset"
+          }
+        ],
+        "requestBody": {
+          "fields": []
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": { \"input_token_price\": 50000.0, \"output_token_price\": 1.0 } }",
+        "authType": "bearer",
+        "authHeader": "garden-app-id"
+      },
+      {
+        "endpoint": "/assets",
+        "method": "GET",
+        "description": "Get list of supported assets and their configurations",
+        "requestBody": {
+          "fields": []
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": { \"assets\": [{ \"asset\": \"string\", \"htlc_address\": \"string\", \"token_address\": \"string\", \"token_id\": \"string\", \"decimals\": 8 }] } }",
+        "authType": "bearer",
+        "authHeader": "garden-app-id"
+      },
+      {
+        "endpoint": "/liquidity",
+        "method": "GET",
+        "description": "Get liquidity information from all solvers for supported assets",
+        "requestBody": {
+          "fields": []
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": { \"liquidity\": [{ \"solver_id\": \"string\", \"liquidity\": [{ \"asset\": \"string\", \"balance\": \"1000.0\", \"virtual_balance\": \"1000.0\", \"readable_balance\": \"1.0\" }] }] } }",
+        "authType": "bearer",
+        "authHeader": "garden-app-id"
+      },
+      {
+        "endpoint": "/eta",
+        "method": "GET",
+        "description": "Get estimated time of arrival for cross-chain transactions",
+        "optionalParams": [
+          {
+            "name": "source_chain",
+            "type": "string",
+            "required": false,
+            "description": "Source blockchain identifier"
+          },
+          {
+            "name": "dest_chain",
+            "type": "string",
+            "required": false,
+            "description": "Destination blockchain identifier"
+          }
+        ],
+        "requestBody": {
+          "fields": []
+        },
+        "responseFormat": "{ \"status\": \"Ok\", \"result\": { \"eta_seconds\": 300 } }",
+        "authType": "bearer",
+        "authHeader": "garden-app-id"
+      }
+    ],
+    "ui_components": []
+  },
+  "tests": {
+    "unit": [],
+    "integration": [],
+    "playwright": [],
+    "api": [
+      "health.api.spec.ts",
+      "quote.api.spec.ts",
+      "order.api.spec.ts",
+      "usd-price.api.spec.ts",
+      "assets.api.spec.ts",
+      "liquidity.api.spec.ts",
+      "eta.api.spec.ts"
+    ]
+  }
+}
