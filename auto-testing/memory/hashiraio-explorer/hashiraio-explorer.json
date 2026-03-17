@@ -1,0 +1,373 @@
+{
+  "kt": {
+    "generated_at": "2026-03-17T16:33:48.177Z",
+    "repoFullName": "hashiraio/explorer",
+    "repoName": "explorer",
+    "description": "",
+    "techStack": "React, Next.js",
+    "readmeContent": "# React + TypeScript + Vite\n\nThis template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.\n\nCurrently, two official plugins are available:\n\n- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh\n- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh\n\n## Expanding the ESLint configuration\n\nIf you are developing a production application, we recommend updating the configuration to enable type aware lint rules:\n\n- Configure the top-level `parserOptions` property like this:\n\n```js\nexport default {\n  // other rules...\n  parserOptions: {\n    ecmaVersion: 'latest',\n    sourceType: 'module',\n    project: ['./tsconfig.json', './tsconfig.node.json'],\n    tsconfigRootDir: __dirname,\n  },\n}\n```\n\n- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`\n- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`\n- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list\n",
+    "architecture": "Next.js 15 React application with TypeScript using App Router architecture. Built as a blockchain explorer for Garden Finance bridge transactions. Uses Tailwind CSS for styling, React Query for data fetching, Zustand for state management, and Motion for animations. Configured for Cloudflare deployment with standalone output. The app follows a component-based architecture with clear separation between pages, components, hooks, services, and utilities. Features responsive design with mobile/desktop variants and real-time transaction monitoring.",
+    "modules": [
+      {
+        "name": "App Router Pages",
+        "description": "Next.js App Router page components handling routing for home, search, address details, transaction details, and order details",
+        "path": "src/app",
+        "last_modified": ""
+      },
+      {
+        "name": "Common Components",
+        "description": "Reusable UI components including layout, navigation, search, buttons, loaders, and utility components",
+        "path": "src/components/common",
+        "last_modified": ""
+      },
+      {
+        "name": "Filters System",
+        "description": "Chain and status filtering components for transaction list filtering with dropdown selectors",
+        "path": "src/components/Filters",
+        "last_modified": ""
+      },
+      {
+        "name": "Transaction Components",
+        "description": "Transaction display components including order details, swap details, and transaction item renderers",
+        "path": "src/components/Transaction",
+        "last_modified": ""
+      },
+      {
+        "name": "Transactions List",
+        "description": "Transaction list components with desktop table and mobile card layouts, includes pagination",
+        "path": "src/components/Transactions",
+        "last_modified": ""
+      },
+      {
+        "name": "Page Components",
+        "description": "Main page-level components for Overview, Lookup, and Transaction views",
+        "path": "src/components/pages",
+        "last_modified": ""
+      },
+      {
+        "name": "Pagination System",
+        "description": "Pagination components for navigating through transaction lists with skeleton loading states",
+        "path": "src/components/Pagination",
+        "last_modified": ""
+      },
+      {
+        "name": "Lookup System",
+        "description": "Search functionality and query results display for addresses, transactions, and orders",
+        "path": "src/components/Lookup",
+        "last_modified": ""
+      },
+      {
+        "name": "Order Services",
+        "description": "API services for fetching order data from Garden Finance orderbook",
+        "path": "src/lib/services/orders",
+        "last_modified": ""
+      },
+      {
+        "name": "Orderbook Service",
+        "description": "Core service for interacting with Garden Finance orderbook API",
+        "path": "src/lib/services/orderbook.ts",
+        "last_modified": ""
+      },
+      {
+        "name": "State Management",
+        "description": "Zustand stores for assets info, viewport responsive state management",
+        "path": "src/lib/store",
+        "last_modified": ""
+      },
+      {
+        "name": "Custom Hooks",
+        "description": "React hooks for orders data fetching, route parameters, time refresh, and transaction status",
+        "path": "src/lib/hooks",
+        "last_modified": ""
+      },
+      {
+        "name": "Utilities",
+        "description": "Helper functions for formatting, parsing, date handling, and UI utilities",
+        "path": "src/lib/utils",
+        "last_modified": ""
+      },
+      {
+        "name": "Constants",
+        "description": "Application constants including API endpoints, global configs, and asset mappings",
+        "path": "src/lib/constants",
+        "last_modified": ""
+      }
+    ],
+    "apis": [],
+    "ui_components": [
+      {
+        "name": "Layout",
+        "path": "src/components/common/Layout.tsx",
+        "description": "Main application layout wrapper with navbar and content area",
+        "elementStyles": [
+          {
+            "selector": "main",
+            "classes": "min-h-screen bg-powder-blue",
+            "text": ""
+          }
+        ],
+        "distinguishingFactors": [
+          "Contains main application navbar",
+          "Uses powder-blue background color",
+          "Wraps all page content"
+        ]
+      },
+      {
+        "name": "Navbar",
+        "path": "src/components/common/Navbar.tsx",
+        "description": "Navigation bar with Garden Explorer branding and search functionality",
+        "distinguishingFactors": [
+          "Garden Explorer branding/logo",
+          "Contains search bar component",
+          "Fixed navigation header"
+        ]
+      },
+      {
+        "name": "SearchBar",
+        "path": "src/components/common/SearchBar.tsx",
+        "description": "Search input component for finding transactions, addresses, and orders",
+        "distinguishingFactors": [
+          "Search input field",
+          "Handles address/transaction/order searches",
+          "Navigation integration"
+        ],
+        "placeholders": [
+          "Search by order ID, transaction hash or address"
+        ]
+      },
+      {
+        "name": "CopyButton",
+        "path": "src/components/common/CopyButton.tsx",
+        "description": "Button component for copying text to clipboard with visual feedback",
+        "buttons": [
+          {
+            "text": "Copy",
+            "className": "copy-button",
+            "type": "button",
+            "role": "button"
+          }
+        ],
+        "distinguishingFactors": [
+          "Copy to clipboard functionality",
+          "Visual feedback on copy action",
+          "Used throughout for copying addresses/hashes"
+        ]
+      },
+      {
+        "name": "Loader",
+        "path": "src/components/common/Loader.tsx",
+        "description": "Loading spinner component using Lottie animations",
+        "elementStyles": [
+          {
+            "selector": "div.loader",
+            "classes": "flex justify-center items-center",
+            "text": ""
+          }
+        ],
+        "distinguishingFactors": [
+          "Animated loading spinner",
+          "Lottie animation based",
+          "Centered loading indicator"
+        ]
+      },
+      {
+        "name": "StatusChip",
+        "path": "src/components/common/StatusChip.tsx",
+        "description": "Status indicator chip showing transaction/order status with color coding",
+        "distinguishingFactors": [
+          "Color-coded status indicators",
+          "Shows transaction status (completed, in progress, etc.)",
+          "Chip-style visual design"
+        ]
+      },
+      {
+        "name": "ChainFilterItem",
+        "path": "src/components/Filters/ChainFilterItem.tsx",
+        "description": "Individual chain filter option with chain logo and selection indicator",
+        "elementStyles": [
+          {
+            "selector": "div.filter-item",
+            "classes": "flex items-center gap-2 px-3 py-1 cursor-pointer transition-colors hover:bg-arctic-blue-light",
+            "text": "Chain name"
+          }
+        ],
+        "distinguishingFactors": [
+          "Chain logo icon (3x3.5 rounded)",
+          "Check icon when selected",
+          "Arctic blue hover/selection states",
+          "Chain name typography"
+        ]
+      },
+      {
+        "name": "ChainFilters",
+        "path": "src/components/Filters/ChainFilters.tsx",
+        "description": "Dropdown filter for selecting blockchain chains with sync icon and reset functionality",
+        "distinguishingFactors": [
+          "ArrowSync icon for reset",
+          "Chain selection dropdown",
+          "Mobile responsive design",
+          "URL parameter integration"
+        ],
+        "htmlIds": [
+          "from_chain",
+          "to_chain"
+        ],
+        "elementStyles": [
+          {
+            "selector": "div",
+            "classes": "w-fit flex items-center gap-2"
+          }
+        ]
+      },
+      {
+        "name": "StatusFilter",
+        "path": "src/components/Filters/StatusFilter.tsx",
+        "description": "Dropdown filter for transaction status selection (not initiated, in progress, completed, expired)",
+        "distinguishingFactors": [
+          "Status selection dropdown",
+          "Default 'Status' placeholder",
+          "OrderLifecycle enum values",
+          "URL parameter integration"
+        ],
+        "htmlIds": [
+          "status"
+        ],
+        "elementStyles": [
+          {
+            "selector": "div",
+            "classes": "w-fit flex items-center gap-3"
+          }
+        ]
+      },
+      {
+        "name": "StatusFilterItem",
+        "path": "src/components/Filters/StatusFilterItem.tsx",
+        "description": "Individual status filter option with selection indicator",
+        "elementStyles": [
+          {
+            "selector": "div.status-filter-item",
+            "classes": "flex items-center gap-2 pl-4 pr-3 py-1 cursor-pointer transition-colors hover:bg-arctic-blue-light",
+            "text": "Status label"
+          }
+        ],
+        "distinguishingFactors": [
+          "Check icon when selected",
+          "Arctic blue hover/selection states",
+          "Status label typography",
+          "Left padding of 4 units"
+        ]
+      },
+      {
+        "name": "QueryResults",
+        "path": "src/components/Lookup/QueryResults.tsx",
+        "description": "Search results header with back navigation and query display",
+        "buttons": [
+          {
+            "text": "",
+            "className": "back-button",
+            "type": "button",
+            "role": "button"
+          }
+        ],
+        "elementStyles": [
+          {
+            "selector": "div.query-header",
+            "classes": "w-full px-5 sm:px-6 md:px-8 lg:px-20 flex flex-col gap-4 md:gap-5",
+            "text": "Search Results"
+          }
+        ],
+        "distinguishingFactors": [
+          "ArrowLeft back navigation icon",
+          "Search Results header typography",
+          "Copy button for query string",
+          "Responsive padding (px-5 to px-20)"
+        ]
+      },
+      {
+        "name": "Pagination",
+        "path": "src/components/Pagination/Pagination.tsx",
+        "description": "Pagination controls with left/right arrows and page numbers",
+        "buttons": [
+          {
+            "text": "",
+            "className": "w-6 h-6 py-1.5",
+            "type": "button",
+            "role": "button"
+          }
+        ],
+        "elementStyles": [
+          {
+            "selector": "div.pagination",
+            "classes": "flex gap-1 justify-center items-center mt-1",
+            "text": ""
+          }
+        ],
+        "distinguishingFactors": [
+          "KeyboardLeft and KeyboardRight icons",
+          "Page number buttons with min-w-7 min-h-7",
+          "Disabled states with opacity-50",
+          "Centered layout with gap-1"
+        ]
+      },
+      {
+        "name": "SkeletonPagination",
+        "path": "src/components/Pagination/SkeletonPagination.tsx",
+        "description": "Loading skeleton for pagination component with animated placeholders",
+        "elementStyles": [
+          {
+            "selector": "div.skeleton-pagination",
+            "classes": "flex gap-1 justify-center items-center mt-1",
+            "text": "..."
+          }
+        ],
+        "distinguishingFactors": [
+          "Keyboard navigation icons with opacity-50",
+          "Animated skeleton buttons with bg-gray-200",
+          "Ellipsis (...) text elements",
+          "Rounded-full skeleton buttons"
+        ]
+      },
+      {
+        "name": "TransactionItem",
+        "path": "src/components/Transactions/TransactionItem.tsx",
+        "description": "Individual transaction display component with desktop row and mobile card variants",
+        "distinguishingFactors": [
+          "Responsive design (desktop vs mobile)",
+          "Transaction status indicators",
+          "Asset amount formatting",
+          "Chain logos and integrator info"
+        ]
+      },
+      {
+        "name": "BtnCollapse",
+        "path": "src/components/common/BtnCollapse.tsx",
+        "description": "Collapsible button component for expanding/collapsing content sections",
+        "buttons": [
+          {
+            "text": "View More / View Less",
+            "className": "collapse-button",
+            "type": "button",
+            "role": "button"
+          }
+        ],
+        "distinguishingFactors": [
+          "Toggle functionality for content visibility",
+          "Dynamic button text (View More/View Less)",
+          "Used in transaction details sections"
+        ]
+      }
+    ]
+  },
+  "tests": {
+    "unit": [],
+    "integration": [],
+    "playwright": [
+      "common.ui.spec.ts",
+      "filters.ui.spec.ts",
+      "lookup.ui.spec.ts",
+      "pagination.ui.spec.ts",
+      "transactions.ui.spec.ts"
+    ],
+    "api": []
+  }
+}

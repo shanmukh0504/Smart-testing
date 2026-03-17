@@ -283,35 +283,25 @@ export class AutoTestingAgent {
       }
     }
 
-    // Generate UI tests — one call per component group, saved immediately
+    // Generate UI tests — crawl the site and generate tests per page
     const uiBaseUrl =
       this.config.uiBaseUrls[repoFullName] ||
       this.config.uiBaseUrls[repoName];
-    if (uiBaseUrl && ktDoc.ui_components.length > 0) {
-      const uiGroups = this.groupComponents(ktDoc.ui_components);
-      for (const [groupName, components] of uiGroups) {
-        try {
-          console.log(`[KT] Generating UI tests: ${groupName} (${components.length} components)`);
-          const scopedKT: KTDocument = { ...ktDoc, ui_components: components };
-          const prompt: TestPrompt = {
-            url: uiBaseUrl,
-            context: `UI tests for the "${groupName}" feature. Test these specific components: ${components.map(c => c.name).join(", ")}. ${ktDoc.description}`,
-            type: "frontend",
-            kt: scopedKT,
-          };
-          const tests = await this.generator.generateFrontendTests(prompt);
-          // Force filenames based on group name — Claude often returns generic "ui.spec.ts"
-          for (let i = 0; i < tests.length; i++) {
-            tests[i].filename = tests.length === 1
-              ? `${groupName}.ui.spec.ts`
-              : `${groupName}-${i + 1}.ui.spec.ts`;
-          }
-          await this.appendTests(tests, repoDir);
-          suite.playwright.push(...tests.map((t) => t.filename));
-          console.log(`[KT] Saved UI test(s) for ${groupName}: ${tests.map(t => t.filename).join(", ")}`);
-        } catch (err) {
-          console.warn(`[KT] Failed to generate UI tests for ${groupName}:`, err);
-        }
+    if (uiBaseUrl) {
+      try {
+        console.log(`[KT] Generating UI tests by crawling: ${uiBaseUrl}`);
+        const prompt: TestPrompt = {
+          url: uiBaseUrl,
+          context: `UI tests for ${repoFullName}. ${ktDoc.description}`,
+          type: "frontend",
+          kt: ktDoc,
+        };
+        const tests = await this.generator.generateFrontendTests(prompt);
+        await this.appendTests(tests, repoDir);
+        suite.playwright.push(...tests.map((t) => t.filename));
+        console.log(`[KT] Saved ${tests.length} UI test file(s): ${tests.map(t => t.filename).join(", ")}`);
+      } catch (err) {
+        console.warn(`[KT] Failed to generate UI tests:`, err);
       }
     }
 

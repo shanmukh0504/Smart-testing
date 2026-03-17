@@ -251,6 +251,7 @@ export interface RunTestsOptions {
   repo?: string;
   branch?: string;
   author?: string;
+  testFiles?: string[];
 }
 
 export interface RunTestsResult {
@@ -268,7 +269,7 @@ export interface RunTestsResult {
 }
 
 export async function runTests(options: RunTestsOptions): Promise<RunTestsResult> {
-  const { jobId, triggerType, runApi = true, runUi = true, rerunFailedOnly = false, repo, branch, author } = options;
+  const { jobId, triggerType, runApi = true, runUi = true, rerunFailedOnly = false, repo, branch, author, testFiles } = options;
 
   if (isRunning) {
     throw new Error("Tests are already running");
@@ -331,9 +332,14 @@ export async function runTests(options: RunTestsOptions): Promise<RunTestsResult
 
   try {
     if (runApi) {
+      const vitestArgs = ["vitest", "run", "--config", "vitest.api.config.ts"];
+      const apiFiles = testFiles?.filter(f => f.endsWith('.api.spec.ts'));
+      if (apiFiles && apiFiles.length > 0) {
+        vitestArgs.push(...apiFiles.map(f => `generated-tests/${repo || ''}/${f}`.replace(/\/\//g, '/')));
+      }
       const { exitCode, stdout } = await runCommand(
         "npx",
-        ["vitest", "run", "--config", "vitest.api.config.ts"],
+        vitestArgs,
         env,
         abortController.signal,
         (jid, prog) => {
@@ -354,6 +360,10 @@ export async function runTests(options: RunTestsOptions): Promise<RunTestsResult
     if (runUi && !abortController.signal.aborted) {
       const playwrightArgs = ["playwright", "test"];
       if (rerunFailedOnly) playwrightArgs.push("--last-failed");
+      const uiFiles = testFiles?.filter(f => f.endsWith('.ui.spec.ts'));
+      if (uiFiles && uiFiles.length > 0) {
+        playwrightArgs.push(...uiFiles.map(f => `generated-tests/${repo || ''}/${f}`.replace(/\/\//g, '/')));
+      }
       const { exitCode, stdout } = await runCommand(
         "npx",
         playwrightArgs,

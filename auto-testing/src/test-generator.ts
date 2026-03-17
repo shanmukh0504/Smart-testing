@@ -6,6 +6,7 @@
 
 import type { ClaudeClient } from "./claude-client.js";
 import type { KTDocument } from "./kt-store.js";
+import { crawlSite, type CrawledPage } from "./page-crawler.js";
 
 export interface TestPrompt {
   /** URL of UI or API to test */
@@ -88,7 +89,135 @@ export class TestGenerator {
 
   // ─── Frontend Tests ─────────────────────────────────────────
 
+  /**
+   * Generate frontend tests by crawling the actual site.
+   * 1. Visit the base URL and discover pages
+   * 2. For each page, capture the real HTML
+   * 3. Send that HTML to Claude to generate accurate Playwright tests
+   */
   async generateFrontendTests(
+    prompt: TestPrompt
+  ): Promise<GeneratedTest[]> {
+    // --- Step 1: Crawl the site to get actual page HTML ---
+    console.log(`[TEST-GEN] Crawling site: ${prompt.url}`);
+    let pages: CrawledPage[];
+    try {
+      pages = await crawlSite(prompt.url, { maxPages: 10, timeout: 15000 });
+    } catch (err) {
+      console.warn("[TEST-GEN] Crawler failed, falling back to KT-based generation:", err);
+      return this.generateFrontendTestsFromKT(prompt);
+    }
+
+    if (pages.length === 0) {
+      console.warn("[TEST-GEN] Crawler returned no pages, falling back to KT-based generation");
+      return this.generateFrontendTestsFromKT(prompt);
+    }
+
+    console.log(`[TEST-GEN] Crawled ${pages.length} pages, generating tests per page...`);
+
+    // --- Step 2: Generate tests for each page using real HTML ---
+    const allTests: GeneratedTest[] = [];
+
+    for (const crawledPage of pages) {
+      try {
+        const tests = await this.generateTestsForPage(crawledPage, prompt);
+        allTests.push(...tests);
+        console.log(`[TEST-GEN] Generated ${tests.length} test file(s) for ${crawledPage.url}`);
+      } catch (err) {
+        console.warn(`[TEST-GEN] Failed to generate tests for ${crawledPage.url}:`, err);
+      }
+    }
+
+    return allTests;
+  }
+
+  /**
+   * Generate Playwright tests for a single page based on its actual HTML.
+   */
+  private async generateTestsForPage(
+    crawledPage: CrawledPage,
+    prompt: TestPrompt
+  ): Promise<GeneratedTest[]> {
+    const kt = prompt.kt;
+    const secretsContext = prompt.secretsAndParams
+      ? `\n## Auth / Params\n${prompt.secretsAndParams}`
+      : "";
+
+    // Build a summary of interactive elements
+    const elemSummary = crawledPage.interactiveElements
+      .map(
+        (el) =>
+          `- <${el.tag}>: "${el.text}" (selector: ${el.selector}${el.href ? `, href: ${el.href}` : ""})`
+      )
+      .join("\n");
+
+    // Derive a page name from path
+    const pageName =
+      crawledPage.path === "/" || crawledPage.path === ""
+        ? "homepage"
+        : crawledPage.path
+            .replace(/^\//, "")
+            .replace(/\//g, "-")
+            .replace(/[^a-z0-9-]/gi, "")
+            .slice(0, 40) || "page";
+
+    const systemPrompt = `You are a Playwright test generator. You write precise, reliable E2E tests based on ACTUAL page HTML — not guesses.
+
+## Target
+- Base URL: ${prompt.url}
+- Current page: ${crawledPage.url}
+- Page title: ${crawledPage.title}
+${kt ? `- Repo: ${kt.repoName || "unknown"} — ${kt.description || ""}` : ""}
+${secretsContext}
+
+## Rules
+1. Use \`@playwright/test\` — import { test, expect } from '@playwright/test'
+2. Use ONLY selectors that exist in the provided HTML — NEVER guess or invent selectors
+3. Prefer: \`getByRole\`, \`getByText\`, \`getByPlaceholder\`, \`getByTestId\`, \`getByLabel\`
+4. Test real user flows: page load, element visibility, clicking, form filling, navigation
+5. Verify visible text and element states that you can see in the HTML
+6. Each test should be independent — use \`page.goto()\` at the start
+7. Use \`baseURL\` from Playwright config — use relative paths in goto (e.g. \`page.goto('/')\`)
+8. Add \`await page.waitForLoadState('networkidle')\` after navigation for SPAs
+9. Handle slow elements with timeouts: \`expect(locator).toBeVisible({ timeout: 10000 })\`
+10. Group related tests in \`test.describe\` blocks
+
+## Test Strategy
+Write MINIMAL but HIGH-COVERAGE tests for this specific page:
+1. **Page load & content** (1 test) — verify page loads and key visible text/elements render
+2. **Interactive elements** (1-2 tests) — test buttons, links, inputs that exist in the HTML
+3. **Navigation** (1 test if links exist) — click a link and verify navigation works
+
+## Output Format
+Return ONLY a JSON object:
+{ "tests": [{ "filename": "${pageName}.ui.spec.ts", "content": "...full typescript code..." }] }
+
+Filenames MUST end with \`.ui.spec.ts\`.`;
+
+    const userMessage = `Here is the ACTUAL HTML of the page at ${crawledPage.url}:
+
+\`\`\`html
+${crawledPage.html}
+\`\`\`
+
+Interactive elements found on this page:
+${elemSummary || "None detected"}
+
+Generate Playwright tests for this page. Base ALL selectors and assertions on the real HTML above.`;
+
+    const text = await this.client.chat({
+      system: systemPrompt,
+      message: userMessage,
+      maxTokens: 16384,
+    });
+
+    return this.parseGeneratedTests(text, "frontend");
+  }
+
+  /**
+   * Fallback: generate frontend tests from KT document (used when crawler fails).
+   */
+  private async generateFrontendTestsFromKT(
     prompt: TestPrompt
   ): Promise<GeneratedTest[]> {
     const kt = prompt.kt;
@@ -117,45 +246,24 @@ ${ktContext}
 ${secretsContext}
 
 ## Your Task
-Generate MINIMAL but HIGH-COVERAGE Playwright UI tests. Use the KT document to understand what pages and components exist.
-
-## Test Strategy — Be Efficient
-Do NOT write redundant tests. Each test should verify something DIFFERENT. Aim for MAXIMUM coverage with MINIMUM test count.
-
-For each page/feature, write:
-1. **Happy path** (1-2 tests) — page loads, key elements render, primary user flow works
-2. **Failure/error state** (1 test) — invalid input, empty state, or error boundary
-3. **Navigation** (1 test only for the whole app) — verify key routes are reachable
-
-Do NOT test the same element twice. Do NOT write separate tests for "page loads" and "content renders" — combine them into one.
+Generate MINIMAL but HIGH-COVERAGE Playwright UI tests.
 
 ## Rules
 1. Use \`@playwright/test\` — import { test, expect } from '@playwright/test'
 2. Every test MUST start with \`await page.goto('${prompt.url}')\` or a subpath
-3. Use resilient selectors: prefer \`getByRole\`, \`getByText\`, \`getByLabel\`, \`getByTestId\` over CSS selectors
-4. Add meaningful test names that describe the user intent, not the implementation
-5. Group related tests in \`test.describe\` blocks by feature or page
-6. Handle async operations: use \`waitForSelector\`, \`waitForResponse\`, or \`waitForLoadState\` before assertions
-7. Use \`expect(locator).toBeVisible()\` over \`toHaveCount\` where possible
-8. For SPA/React/Vue apps: wait for hydration — add \`await page.waitForLoadState('networkidle')\` after navigation
-9. Keep tests independent — no test should depend on another test's state
-10. Add timeouts for slow-loading elements: \`expect(locator).toBeVisible({ timeout: 10000 })\`
-11. **CRITICAL — Use KT-provided selectors ONLY. NEVER guess selectors.** When the KT provides:
-    - Test IDs → use \`page.getByTestId('id')\`
-    - HTML IDs → use \`page.locator('#id')\`
-    - Placeholders → use \`page.getByPlaceholder('text')\`
-    - ARIA labels → use \`page.getByLabel('label')\`
-    - Text content → use \`page.getByText('text')\` or \`page.getByRole('button', { name: 'text' })\`
-    - If the KT does NOT list selectors for a component, DO NOT write tests that click or assert on elements you cannot identify — skip that test or test only page load
-12. Generate multiple test files grouped by feature/page if the app is large
+3. Use resilient selectors: prefer \`getByRole\`, \`getByText\`, \`getByLabel\`, \`getByTestId\`
+4. Group related tests in \`test.describe\` blocks by feature or page
+5. For SPA apps: add \`await page.waitForLoadState('networkidle')\` after navigation
+6. Keep tests independent
+7. Use KT-provided selectors when available. If the KT does NOT list selectors for a component, skip that test
 
 ## Output Format
 Return ONLY a JSON object:
 { "tests": [{ "filename": "feature-name.ui.spec.ts", "content": "...typescript code..." }] }
 
-Filenames MUST end with \`.ui.spec.ts\`. Use descriptive filenames based on the feature (e.g. "auth-flow.ui.spec.ts", "dashboard-widgets.ui.spec.ts").`;
+Filenames MUST end with \`.ui.spec.ts\`.`;
 
-    const userMessage = `Generate comprehensive Playwright UI tests for: ${prompt.url}\n\nContext: ${prompt.context}${prompt.diffContext ? `\n\nChanged code (PR diff):\n${prompt.diffContext}` : ""}`;
+    const userMessage = `Generate Playwright UI tests for: ${prompt.url}\n\nContext: ${prompt.context}${prompt.diffContext ? `\n\nChanged code (PR diff):\n${prompt.diffContext}` : ""}`;
 
     const text = await this.client.chat({
       system: systemPrompt,

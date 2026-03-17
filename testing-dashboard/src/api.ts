@@ -182,6 +182,13 @@ export const api = {
   triggerTest: () =>
     fetchJSON<{ jobId: string; status?: string; reportUrl: string }>(`${API_BASE}/test/trigger`, { method: 'POST' }),
 
+  runTestFiles: (params: { repo: string; files?: string[] }) =>
+    fetchJSON<{ jobId: string; status?: string; reportUrl: string }>(`${API_BASE}/test/run-files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    }),
+
   rerunTests: () =>
     fetchJSON<{ jobId: string; status?: string; reportUrl: string }>(`${API_BASE}/test/rerun`, { method: 'POST' }),
 

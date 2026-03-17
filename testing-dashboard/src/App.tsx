@@ -334,6 +334,8 @@ function App() {
   const handleTrigger = () => withError(() => api.triggerTest().then(() => {}))
   const handleRerun = () => withError(() => api.rerunTests().then(() => {}))
   const handleRerunFailed = () => withError(() => api.rerunFailedTests().then(() => {}))
+  const handleRunTestFile = (repo: string, file: string) => withError(() => api.runTestFiles({ repo, files: [file] }).then(() => {}))
+  const handleRunAllRepoTests = (repo: string) => withError(() => api.runTestFiles({ repo }).then(() => {}))
   const handleCancel = () => withError(() => api.cancelTest().then(() => {}))
 
   const handleGenerateTests = async () => {
@@ -718,10 +720,10 @@ function App() {
                       </div>
                     )}
                     <Textarea
-                      placeholder="Secrets & Params (optional) — API keys, auth tokens, headers, param values, request bodies the tests should use. e.g.&#10;Authorization: Bearer sk-test-xxx&#10;X-API-Key: my-key-123&#10;order_pair: BTC/ETH&#10;body.address: 0xabc..."
+                      placeholder="Secrets & params — e.g. Authorization: Bearer sk-xxx, X-API-Key: my-key"
                       value={genSecretsAndParams}
                       onChange={e => setGenSecretsAndParams(e.target.value)}
-                      rows={4}
+                      rows={2}
                       className="font-mono text-[12px]"
                     />
                     <Button onClick={handleGenerateTests} disabled={genLoading || isRunning || !genRepo.trim()} className="self-start">
@@ -754,7 +756,7 @@ function App() {
                     )}
                     {addCasesRepo && (
                       <Textarea
-                        placeholder="Secrets & Params (optional) — API keys, auth tokens, headers, param values, request bodies the tests should use. e.g.&#10;Authorization: Bearer sk-test-xxx&#10;X-API-Key: my-key-123&#10;order_pair: BTC/ETH&#10;body.address: 0xabc..."
+                        placeholder="Secrets & params — e.g. Authorization: Bearer sk-xxx, X-API-Key: my-key"
                         value={addCasesSecretsParams}
                         onChange={e => setAddCasesSecretsParams(e.target.value)}
                         rows={3}
@@ -1150,12 +1152,21 @@ function App() {
                               <h4 className="text-[13px] font-semibold text-[#e1e3e6] m-0">{repo}</h4>
                               {repoType && <Badge color={repoType === 'backend' ? 'blue' : 'purple'}>{repoType}</Badge>}
                               <span className="text-[11px] text-[#555d6e]">{(tests.testsByRepo[repo] || []).length} files</span>
+                              <div className="ml-auto">
+                                <button
+                                  onClick={() => handleRunAllRepoTests(repo)}
+                                  disabled={isRunning}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium bg-[#4ade8018] text-[#4ade80] border border-[#4ade8030] hover:bg-[#4ade8028] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <IconPlay size={12} /> Run All
+                                </button>
+                              </div>
                             </div>
                             <div className="flex flex-col gap-1.5">
                               {(tests.testsByRepo[repo] || []).map(f => (
                                 <div
                                   key={f}
-                                  className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer transition-colors ${
+                                  className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer transition-colors group ${
                                     selectedTest?.repo === repo && selectedTest?.file === f
                                       ? 'bg-[#ff983015] border border-[#ff983030]'
                                       : 'hover:bg-[#1a1d24]'
@@ -1163,7 +1174,15 @@ function App() {
                                   onClick={() => handleSelectTest(repo, f)}
                                 >
                                   <span className={`status-dot ${f.endsWith('.ui.spec.ts') ? 'bg-[#a78bfa]' : 'bg-[#60a5fa]'}`} />
-                                  <code className="text-[12px] font-mono text-[#8b92a0]">{f}</code>
+                                  <code className="text-[12px] font-mono text-[#8b92a0] flex-1">{f}</code>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleRunTestFile(repo, f); }}
+                                    disabled={isRunning}
+                                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-[#1e2229] text-[#8b92a0] border border-[#2a2f38] hover:bg-[#252a34] hover:text-[#4ade80] opacity-0 group-hover:opacity-100 disabled:opacity-0 disabled:hover:opacity-0 transition-all"
+                                    title={`Run ${f}`}
+                                  >
+                                    <IconPlay size={10} /> Run
+                                  </button>
                                 </div>
                               ))}
                             </div>

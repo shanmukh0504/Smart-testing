@@ -238,6 +238,51 @@ export function startServer(port: number = DEFAULT_PORT): void {
     }).catch((err) => console.error("[TEST] Run failed:", err));
   });
 
+  // --- API: Run specific test files for a repo ---
+  app.post("/api/test/run-files", async (req: Request, res: Response) => {
+    if (isTestRunning()) {
+      return json(res, { error: "Tests already running" }, 409);
+    }
+    const { repo, files } = req.body as { repo: string; files?: string[] };
+    if (!repo) {
+      return json(res, { error: "repo is required" }, 400);
+    }
+
+    // Determine which test types to run
+    let hasApi = false;
+    let hasUi = false;
+    if (files && files.length > 0) {
+      hasApi = files.some((f: string) => f.endsWith(".api.spec.ts"));
+      hasUi = files.some((f: string) => f.endsWith(".ui.spec.ts"));
+    } else {
+      // Run all tests for the repo
+      const repoDir = join(GENERATED_TESTS_DIR, repo);
+      if (existsSync(repoDir)) {
+        try {
+          const repoFiles = await readdir(repoDir);
+          hasApi = repoFiles.some((f) => f.endsWith(".api.spec.ts"));
+          hasUi = repoFiles.some((f) => f.endsWith(".ui.spec.ts"));
+        } catch { /* ignore */ }
+      }
+      if (!hasApi && !hasUi) { hasApi = true; hasUi = true; }
+    }
+
+    const jobId = generateJobId();
+    json(res, {
+      jobId,
+      status: "started",
+      reportUrl: `http://localhost:${serverPort}/report/${jobId}`,
+    });
+    runTests({
+      jobId,
+      triggerType: "manual",
+      runApi: hasApi,
+      runUi: hasUi,
+      repo,
+      testFiles: files,
+    }).catch((err) => console.error("[TEST] Run files failed:", err));
+  });
+
   app.post("/api/test/rerun-failed", async (req: Request, res: Response) => {
     if (isTestRunning()) {
       return json(res, { error: "Tests already running" }, 409);
@@ -1025,7 +1070,7 @@ ${apiReport ? `<pre>${JSON.stringify(apiReport, null, 2)}</pre>` : "<p>No report
     res.type("text/plain").send(
       `Auto Testing Server\n\n` +
         `API: GET /api/tests, /api/runs, /api/schedule, /api/kt\n` +
-        `POST /api/test/trigger, /api/test/add-cases, /api/test/cancel\n` +
+        `POST /api/test/trigger, /api/test/run-files, /api/test/add-cases, /api/test/cancel\n` +
         `POST /api/pr/test, /api/webhook/pr, /api/test/request\n` +
         `POST /api/kt/generate\n` +
         `GET /report, /report/:jobId\n`
