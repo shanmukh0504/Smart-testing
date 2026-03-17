@@ -7,6 +7,10 @@ export function reportUrl(jobId: string): string {
   return API_ORIGIN ? `${API_ORIGIN}/report/${jobId}` : `/report/${jobId}`;
 }
 
+export function apiReportJsonUrl(jobId: string): string {
+  return API_ORIGIN ? `${API_ORIGIN}/report/${jobId}/api` : `/report/${jobId}/api`;
+}
+
 export interface RunHistoryEntry {
   jobId: string;
   total: number;

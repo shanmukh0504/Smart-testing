@@ -2,10 +2,11 @@
  * Main orchestrator - Auto Testing Agent
  * Supports two modes: PR Mode and Test Request Mode
  * Includes KT (Knowledge Transfer) generation and persistence
+ *
+ * All repo context flows through the KT document — no separate RepoAnalyzer needed.
  */
 
 import type { GitProvider, PRDiffFile } from "./git-provider.js";
-import { RepoAnalyzer, RepoContext } from "./repo-analyzer.js";
 import { TestGenerator, TestPrompt, GeneratedTest } from "./test-generator.js";
 import { KTGenerator } from "./kt-generator.js";
 import { createClaudeClient } from "./claude-client.js";
@@ -20,6 +21,7 @@ import {
   type KTTestSuite,
   type KTApi,
   type KTUIComponent,
+  type RepoMetadata,
 } from "./kt-store.js";
 import { cloneRepo } from "./repo-cloner.js";
 import type { RepoTestConfig } from "./config.js";
@@ -86,19 +88,24 @@ export interface TestRequestResult {
   ktUpdateSummary?: string;
 }
 
+/** Lightweight repo info cached during bootstrap */
+interface RepoInfo {
+  fullName: string;
+  name: string;
+  description: string;
+}
+
 export class AutoTestingAgent {
   private git: GitProvider;
-  private analyzer: RepoAnalyzer;
   private generator: TestGenerator;
   private ktGenerator: KTGenerator;
   private config: RepoTestConfig;
   private outputDir: string;
-  private repoContexts: Map<string, RepoContext> = new Map();
+  private repoInfoCache: Map<string, RepoInfo> = new Map();
   private repoClonePaths: Map<string, string> = new Map();
 
   constructor(options: AgentOptions) {
     this.git = options.gitProvider;
-    this.analyzer = new RepoAnalyzer(this.git);
 
     const client = createClaudeClient(options.anthropicApiKey, options.claudeModel);
     this.generator = new TestGenerator(client);
@@ -106,6 +113,48 @@ export class AutoTestingAgent {
 
     this.config = options.config;
     this.outputDir = options.outputDir || "./generated-tests";
+  }
+
+  // ─── Repo Metadata ──────────────────────────────────────────
+
+  /**
+   * Build RepoMetadata by fetching from git provider and reading README.
+   */
+  private async getRepoMetadata(repoFullName: string): Promise<RepoMetadata> {
+    const [owner, repoName] = repoFullName.split("/");
+    const gitRepo = await this.git.getRepo(owner, repoName);
+
+    let readmeContent = "";
+
+    // Try from local clone first
+    const clonePath = this.repoClonePaths.get(repoFullName);
+    if (clonePath) {
+      for (const name of ["README.md", "README.MD", "readme.md", "Readme.md"]) {
+        const p = join(clonePath, name);
+        if (existsSync(p)) {
+          readmeContent = await readFile(p, "utf-8");
+          break;
+        }
+      }
+    }
+
+    // Fall back to git API
+    if (!readmeContent) {
+      const branch = gitRepo.default_branch || "main";
+      for (const name of ["README.md", "README.MD", "readme.md", "Readme.md"]) {
+        try {
+          readmeContent = await this.git.getFile(owner, repoName, name, branch);
+          break;
+        } catch { /* try next */ }
+      }
+    }
+
+    return {
+      fullName: gitRepo.full_name,
+      name: repoName,
+      description: gitRepo.description || "",
+      readmeContent: readmeContent || "(No README found)",
+    };
   }
 
   // ─── KT Management ────────────────────────────────────────────
@@ -123,9 +172,8 @@ export class AutoTestingAgent {
     }
 
     console.log(`[KT] No KT found for ${repoFullName}. Generating from main branch...`);
-    const repoContext = await this.getEnhancedRepoContext(repoFullName);
 
-    // Ensure we have a clone path (getEnhancedRepoContext may return cached context without cloning)
+    // Ensure we have a clone
     let clonePath = this.repoClonePaths.get(repoFullName);
     if (!clonePath) {
       try {
@@ -139,8 +187,10 @@ export class AutoTestingAgent {
       }
     }
 
+    const metadata = await this.getRepoMetadata(repoFullName);
+
     // Generate KT document (scanner collects data, AI analyzes it)
-    const ktDoc = await this.ktGenerator.generateKT(repoContext, clonePath);
+    const ktDoc = await this.ktGenerator.generateKT(metadata, clonePath);
     console.log(
       `[KT] Generated KT: ${ktDoc.modules.length} modules, ${ktDoc.apis.length} APIs, ${ktDoc.ui_components.length} UI components`
     );
@@ -167,8 +217,7 @@ export class AutoTestingAgent {
       return;
     }
 
-    const repoContext = await this.getEnhancedRepoContext(repoFullName);
-    const testSuite = await this.generateFullTestSuite(repoContext, repoFullName, existing.kt);
+    const testSuite = await this.generateFullTestSuite(repoFullName, existing.kt);
 
     // Merge new tests with any existing ones and save
     const merged = mergeTestSuites(existing.tests, testSuite);
@@ -183,19 +232,13 @@ export class AutoTestingAgent {
    * Generates per-group (API group / UI component group) and saves each file immediately.
    */
   private async generateFullTestSuite(
-    repoContext: RepoContext,
     repoFullName: string,
-    ktDoc?: KTDocument
+    ktDoc: KTDocument
   ): Promise<KTTestSuite> {
     const suite: KTTestSuite = { unit: [], integration: [], playwright: [], api: [] };
 
-    // Use provided KT doc, or load from store as fallback
-    if (!ktDoc) {
-      const existingKT = await loadKT(repoFullName);
-      ktDoc = existingKT?.kt;
-    }
-
-    const repoDir = repoContext.name.replace(/\//g, "-");
+    const repoName = ktDoc.repoName || repoFullName.split("/").pop() || "";
+    const repoDir = repoName.replace(/\//g, "-");
 
     // Clear existing test files before generating fresh ones
     const dir = join(this.outputDir, repoDir);
@@ -210,8 +253,8 @@ export class AutoTestingAgent {
     // Generate API tests — one call per API group, saved immediately
     const apiBaseUrl =
       this.config.apiBaseUrls[repoFullName] ||
-      this.config.apiBaseUrls[repoContext.name];
-    if (apiBaseUrl && ktDoc && ktDoc.apis.length > 0) {
+      this.config.apiBaseUrls[repoName];
+    if (apiBaseUrl && ktDoc.apis.length > 0) {
       const apiGroups = this.groupAPIs(ktDoc.apis);
       for (const [groupName, apis] of apiGroups) {
         try {
@@ -219,12 +262,12 @@ export class AutoTestingAgent {
           const scopedKT: KTDocument = { ...ktDoc, apis };
           const prompt: TestPrompt = {
             url: apiBaseUrl,
-            context: `API tests for the "${groupName}" feature. Test these specific endpoints: ${apis.map(a => `${a.method} ${a.endpoint}`).join(", ")}. ${repoContext.description}`,
+            context: `API tests for the "${groupName}" feature. Test these specific endpoints: ${apis.map(a => `${a.method} ${a.endpoint}`).join(", ")}. ${ktDoc.description}`,
             type: "backend",
             apiBaseUrl,
             kt: scopedKT,
           };
-          const tests = await this.generator.generateBackendTests(prompt, repoContext, apiBaseUrl);
+          const tests = await this.generator.generateBackendTests(prompt, apiBaseUrl);
           // Force filenames based on group name — Claude often returns generic "api.spec.ts"
           for (let i = 0; i < tests.length; i++) {
             tests[i].filename = tests.length === 1
@@ -243,8 +286,8 @@ export class AutoTestingAgent {
     // Generate UI tests — one call per component group, saved immediately
     const uiBaseUrl =
       this.config.uiBaseUrls[repoFullName] ||
-      this.config.uiBaseUrls[repoContext.name];
-    if (uiBaseUrl && ktDoc && ktDoc.ui_components.length > 0) {
+      this.config.uiBaseUrls[repoName];
+    if (uiBaseUrl && ktDoc.ui_components.length > 0) {
       const uiGroups = this.groupComponents(ktDoc.ui_components);
       for (const [groupName, components] of uiGroups) {
         try {
@@ -252,11 +295,11 @@ export class AutoTestingAgent {
           const scopedKT: KTDocument = { ...ktDoc, ui_components: components };
           const prompt: TestPrompt = {
             url: uiBaseUrl,
-            context: `UI tests for the "${groupName}" feature. Test these specific components: ${components.map(c => c.name).join(", ")}. ${repoContext.description}`,
+            context: `UI tests for the "${groupName}" feature. Test these specific components: ${components.map(c => c.name).join(", ")}. ${ktDoc.description}`,
             type: "frontend",
             kt: scopedKT,
           };
-          const tests = await this.generator.generateFrontendTests(prompt, repoContext);
+          const tests = await this.generator.generateFrontendTests(prompt);
           // Force filenames based on group name — Claude often returns generic "ui.spec.ts"
           for (let i = 0; i < tests.length; i++) {
             tests[i].filename = tests.length === 1
@@ -349,13 +392,10 @@ export class AutoTestingAgent {
     const modified = changedFiles.filter((f) => f.status === "modified");
     const removed = changedFiles.filter((f) => f.status === "removed");
 
-    // Step 3: Get repo context and generate tests for changes
-    const repoContext = await this.getEnhancedRepoContext(repo);
+    // Step 3: Generate tests for changes
     const diffContext = this.buildDiffContext(changedFiles, kt.kt);
-
     const testsGenerated: GeneratedTest[] = [];
 
-    // Generate tests based on change types
     const hasBackendChanges = changedFiles.some((f) =>
       this.isBackendFile(f.filename)
     );
@@ -371,8 +411,7 @@ export class AutoTestingAgent {
         this.config.apiBaseUrls[repoName];
       if (apiBaseUrl) {
         const backendTests = await this.generator.generatePRTests(
-          { url: apiBaseUrl, context: "", type: "backend", apiBaseUrl },
-          repoContext,
+          { url: apiBaseUrl, context: "", type: "backend", apiBaseUrl, kt: kt.kt },
           diffContext,
           kt.kt,
           "backend",
@@ -389,8 +428,7 @@ export class AutoTestingAgent {
         this.config.uiBaseUrls[repoName];
       if (uiBaseUrl) {
         const frontendTests = await this.generator.generatePRTests(
-          { url: uiBaseUrl, context: "", type: "frontend" },
-          repoContext,
+          { url: uiBaseUrl, context: "", type: "frontend", kt: kt.kt },
           diffContext,
           kt.kt,
           "frontend",
@@ -512,16 +550,14 @@ export class AutoTestingAgent {
       if (ktModule && ktModule.last_modified && isModuleStale(kt.kt, ktModule.last_modified)) {
         console.log(`[TEST-REQ] Module "${moduleName}" is stale. Updating KT...`);
 
-        // Re-scan the repo deterministically
-        const repoContext = await this.getEnhancedRepoContext(repo);
         const clonePath = this.repoClonePaths.get(repo);
-
         if (clonePath) {
+          const metadata = await this.getRepoMetadata(repo);
           const updatedKTDoc = await this.ktGenerator.updateModuleKT(
             kt.kt,
             { name: ktModule.name, path: ktModule.path },
             clonePath,
-            repoContext
+            metadata
           );
           kt.kt = updatedKTDoc;
           await saveKT(repo, kt);
@@ -532,11 +568,10 @@ export class AutoTestingAgent {
     }
 
     // Step 3: Generate tests
-    const repoContext = await this.getEnhancedRepoContext(repo);
     const [, repoName] = repo.split("/");
     const testsGenerated: GeneratedTest[] = [];
 
-    const effectiveType = type || await this.inferTestType(repo, repoContext);
+    const effectiveType = type || await this.inferTestType(repo);
     const moduleContext = moduleName
       ? `Generate tests specifically for the "${moduleName}" module/feature.`
       : `Generate comprehensive tests for all modules.`;
@@ -549,14 +584,13 @@ export class AutoTestingAgent {
       if (effectiveApiBaseUrl) {
         const prompt: TestPrompt = {
           url: effectiveApiBaseUrl,
-          context: `${moduleContext}\n${repoContext.description}`,
+          context: `${moduleContext}\n${kt.kt.description}`,
           type: "backend",
           apiBaseUrl: effectiveApiBaseUrl,
           kt: kt.kt,
         };
         const tests = await this.generator.generateBackendTests(
           prompt,
-          repoContext,
           effectiveApiBaseUrl
         );
         testsGenerated.push(...tests);
@@ -571,11 +605,11 @@ export class AutoTestingAgent {
       if (effectiveUiBaseUrl) {
         const prompt: TestPrompt = {
           url: effectiveUiBaseUrl,
-          context: `${moduleContext}\n${repoContext.description}`,
+          context: `${moduleContext}\n${kt.kt.description}`,
           type: "frontend",
           kt: kt.kt,
         };
-        const tests = await this.generator.generateFrontendTests(prompt, repoContext);
+        const tests = await this.generator.generateFrontendTests(prompt);
         testsGenerated.push(...tests);
       }
     }
@@ -603,8 +637,7 @@ export class AutoTestingAgent {
   }
 
   private async inferTestType(
-    repo: string,
-    repoContext: RepoContext
+    repo: string
   ): Promise<"frontend" | "backend" | undefined> {
     // Check settings first - user explicitly set repo type
     const settings = await loadRepoSettings(repo);
@@ -627,7 +660,7 @@ export class AutoTestingAgent {
   // ─── Original Methods (preserved) ─────────────────────────────
 
   /**
-   * Fetch recent repos and build context for configured repos
+   * Fetch recent repos and cache basic info for repo resolution
    */
   async bootstrap(): Promise<void> {
     const recentRepos = await this.git.getRecentRepos(
@@ -650,67 +683,34 @@ export class AutoTestingAgent {
         : validRepos.slice(0, Math.min(this.config.recentReposLimit, 120));
 
     for (const repo of reposToAnalyze) {
-      try {
-        const ctx = await this.analyzer.analyzeFromApi(repo);
-        this.repoContexts.set(repo.full_name, ctx);
-        this.repoContexts.set(repo.name, ctx);
-      } catch (err) {
-        console.warn(`Failed to analyze ${repo.full_name}:`, err);
-      }
+      const info: RepoInfo = {
+        fullName: repo.full_name,
+        name: repo.name,
+        description: repo.description || "",
+      };
+      this.repoInfoCache.set(repo.full_name, info);
+      this.repoInfoCache.set(repo.name, info);
     }
   }
 
   /**
-   * Resolve which repo context to use based on prompt
+   * Resolve which repo to use based on prompt
    */
-  private resolveRepoContext(prompt: TestPrompt, hint?: string): RepoContext | null {
-    if (hint && this.repoContexts.has(hint)) {
-      return this.repoContexts.get(hint)!;
+  private resolveRepo(prompt: TestPrompt, hint?: string): RepoInfo | null {
+    if (hint && this.repoInfoCache.has(hint)) {
+      return this.repoInfoCache.get(hint)!;
     }
 
-    for (const [key, ctx] of this.repoContexts) {
+    for (const [key, info] of this.repoInfoCache) {
       if (
-        prompt.context.toLowerCase().includes(ctx.name.toLowerCase()) ||
+        prompt.context.toLowerCase().includes(info.name.toLowerCase()) ||
         prompt.context.toLowerCase().includes(key.toLowerCase())
       ) {
-        return ctx;
+        return info;
       }
     }
 
-    return this.repoContexts.values().next().value || null;
-  }
-
-  /**
-   * Get enhanced repo context with local clone data
-   */
-  private async getEnhancedRepoContext(repoFullName: string): Promise<RepoContext> {
-    // Check cache first
-    if (this.repoContexts.has(repoFullName)) {
-      return this.repoContexts.get(repoFullName)!;
-    }
-
-    const [owner, repoName] = repoFullName.split("/");
-    const gitRepo = await this.git.getRepo(owner, repoName);
-    let repoContext = await this.analyzer.analyzeFromApi(gitRepo);
-
-    // Enhance with local clone
-    try {
-      const clonePath = await cloneRepo(this.git, gitRepo);
-      this.repoClonePaths.set(repoFullName, clonePath);
-      const localContext = await this.analyzer.analyzeFromLocal(
-        clonePath,
-        repoFullName
-      );
-      repoContext = { ...repoContext, ...localContext };
-    } catch (err) {
-      console.warn("Could not clone repo for context, using API context:", err);
-    }
-
-    // Cache it
-    this.repoContexts.set(repoFullName, repoContext);
-    this.repoContexts.set(repoName, repoContext);
-
-    return repoContext;
+    return this.repoInfoCache.values().next().value || null;
   }
 
   /**
@@ -719,15 +719,18 @@ export class AutoTestingAgent {
    */
   async generateTests(options: RunOptions): Promise<GeneratedTest[]> {
     const { prompt, repoHint } = options;
-    let repoContext = this.resolveRepoContext(prompt, repoHint);
+    const repoInfo = this.resolveRepo(prompt, repoHint);
 
-    if (!repoContext) {
+    if (!repoInfo) {
       throw new Error(
         "No repo context found. Run bootstrap() first or provide repoHint."
       );
     }
 
-    const dir = join(this.outputDir, repoContext.name.replace(/\//g, "-"));
+    const repoName = repoInfo.name;
+    const repoFullName = repoInfo.fullName;
+
+    const dir = join(this.outputDir, repoName.replace(/\//g, "-"));
     const expectedSuffix = prompt.type === "frontend" ? ".ui.spec.ts" : ".api.spec.ts";
 
     if (existsSync(dir)) {
@@ -742,24 +745,22 @@ export class AutoTestingAgent {
       }
     }
 
-    // Clone repo for enhanced context
-    try {
-      const [owner, repoName] = repoContext.fullName.split("/");
-      const gitRepo = await this.git.getRepo(owner, repoName);
-      const clonePath = await cloneRepo(this.git, gitRepo);
-      const localContext = await this.analyzer.analyzeFromLocal(
-        clonePath,
-        repoContext.fullName
-      );
-      repoContext = { ...repoContext, ...localContext };
-    } catch (err) {
-      console.warn("Could not clone repo for context, using API context:", err);
+    // Clone repo if needed
+    if (!this.repoClonePaths.has(repoFullName)) {
+      try {
+        const [owner, name] = repoFullName.split("/");
+        const gitRepo = await this.git.getRepo(owner, name);
+        const clonePath = await cloneRepo(this.git, gitRepo);
+        this.repoClonePaths.set(repoFullName, clonePath);
+      } catch (err) {
+        console.warn("Could not clone repo for context:", err);
+      }
     }
 
     // Ensure KT exists and inject into prompt
     let ktDoc: KTDocument | undefined;
     try {
-      const { kt } = await this.ensureKT(repoContext.fullName);
+      const { kt } = await this.ensureKT(repoFullName);
       ktDoc = kt.kt;
     } catch (err) {
       console.warn("[KT] Failed to generate KT during test generation:", err);
@@ -769,25 +770,24 @@ export class AutoTestingAgent {
     let tests: GeneratedTest[] = [];
 
     if (enrichedPrompt.type === "frontend") {
-      tests = await this.generator.generateFrontendTests(enrichedPrompt, repoContext);
+      tests = await this.generator.generateFrontendTests(enrichedPrompt);
     } else {
       const baseUrl =
         prompt.apiBaseUrl ||
-        this.config.apiBaseUrls[repoContext.fullName] ||
-        this.config.apiBaseUrls[repoContext.name];
+        this.config.apiBaseUrls[repoFullName] ||
+        this.config.apiBaseUrls[repoName];
       if (!baseUrl) {
         throw new Error(
-          `No API base URL for ${repoContext.fullName}. Add to config apiBaseUrls.`
+          `No API base URL for ${repoFullName}. Add to config apiBaseUrls.`
         );
       }
       tests = await this.generator.generateBackendTests(
         enrichedPrompt,
-        repoContext,
         baseUrl
       );
     }
 
-    await this.writeTests(tests, repoContext.name);
+    await this.writeTests(tests, repoName);
     return tests;
   }
 
@@ -827,16 +827,11 @@ export class AutoTestingAgent {
   }): Promise<GeneratedTest[]> {
     const { userPrompt, repo, apiBaseUrl, endpoint, sampleReq, secretsAndParams } = options;
 
-    let repoContext = this.repoContexts.get(repo) ?? this.repoContexts.get(repo.split("/").pop() || "");
-    if (!repoContext) {
-      await this.bootstrap();
-      repoContext = this.repoContexts.get(repo) ?? this.repoContexts.get(repo.split("/").pop() || "");
-    }
-    if (!repoContext) {
-      throw new Error(`Repo context not found for ${repo}. Run bootstrap first.`);
-    }
+    // Load or generate KT for this repo
+    const { kt } = await this.ensureKT(repo);
 
-    const dirName = repoContext.name.replace(/\//g, "-");
+    const repoName = kt.kt.repoName || repo.split("/").pop() || repo;
+    const dirName = repoName.replace(/\//g, "-");
     const dir = join(this.outputDir, dirName);
 
     if (!existsSync(dir)) {
@@ -863,8 +858,8 @@ export class AutoTestingAgent {
     const baseUrl =
       apiBaseUrl ||
       this.config.apiBaseUrls[repo] ||
-      this.config.apiBaseUrls[repoContext.fullName] ||
-      this.config.apiBaseUrls[repoContext.name];
+      this.config.apiBaseUrls[kt.kt.repoFullName || ""] ||
+      this.config.apiBaseUrls[repoName];
 
     if (type === "backend" && !baseUrl) {
       throw new Error(`No API base URL for ${repo}. Add to config apiBaseUrls.`);
@@ -872,11 +867,10 @@ export class AutoTestingAgent {
 
     const newTests = await this.generator.generateAdditionalTests(
       userPrompt,
-      repoContext,
       existingContent,
       type,
       baseUrl,
-      { endpoint, sampleReq, secretsAndParams }
+      { endpoint, sampleReq, secretsAndParams, kt: kt.kt }
     );
 
     await this.appendTests(newTests, dirName);
@@ -904,12 +898,12 @@ export class AutoTestingAgent {
   }
 
   /**
-   * Get all repo contexts (for debugging)
+   * Get all cached repo infos (for debugging/CLI display)
    */
-  getRepoContexts(): RepoContext[] {
+  getRepoInfos(): RepoInfo[] {
     return Array.from(
       new Map(
-        Array.from(this.repoContexts.entries()).filter(([k]) =>
+        Array.from(this.repoInfoCache.entries()).filter(([k]) =>
           k.includes("/")
         )
       ).values()

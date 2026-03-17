@@ -7,8 +7,7 @@
 
 import { DeterministicKTGenerator, type ScannedRepoData, type ExtractedUISelectors, type ExtractedAPIContract, type ExtractedButtonInfo } from "./deterministic-kt-generator.js";
 import type { ClaudeClient } from "./claude-client.js";
-import type { RepoContext } from "./repo-analyzer.js";
-import type { KTDocument, KTModule, KTApi, KTUIComponent, KTUIButton, KTApiParam } from "./kt-store.js";
+import type { KTDocument, KTModule, KTApi, KTUIComponent, KTUIButton, KTApiParam, RepoMetadata } from "./kt-store.js";
 import { basename } from "path";
 
 export class KTGenerator {
@@ -26,10 +25,10 @@ export class KTGenerator {
    * 2. Feeds collected data to Claude for intelligent analysis
    * 3. Falls back to scanner-only results if AI fails
    */
-  async generateKT(repoContext: RepoContext, repoPath?: string): Promise<KTDocument> {
+  async generateKT(metadata: RepoMetadata, repoPath?: string): Promise<KTDocument> {
     if (!repoPath) {
-      console.log(`[KT] No local clone available, building minimal KT from repo context`);
-      return this.buildMinimalKT(repoContext);
+      console.log(`[KT] No local clone available, building minimal KT from repo metadata`);
+      return this.buildMinimalKT(metadata);
     }
 
     // Step 1: Deterministic scan to collect raw data
@@ -49,7 +48,7 @@ export class KTGenerator {
     try {
       console.log(`[KT] Sending scanned data to AI for analysis...`);
       console.log(`[KT] Scanned data size: tree=${scanned.directoryTree.length} chars, snippets=${scanned.sourceSnippets.length} chars`);
-      const aiKT = await this.analyzeWithAI(repoContext, scanned);
+      const aiKT = await this.analyzeWithAI(metadata, scanned);
       console.log(
         `[KT] AI analysis complete: ${aiKT.modules.length} modules, ${aiKT.apis.length} APIs, ${aiKT.ui_components.length} UI components`
       );
@@ -59,7 +58,7 @@ export class KTGenerator {
       return aiKT;
     } catch (err) {
       console.warn(`[KT] AI analysis failed, using scanner results as fallback:`, err);
-      const fallbackKT = this.buildKTFromScan(repoContext, scanned);
+      const fallbackKT = this.buildKTFromScan(metadata, scanned);
       this.mergeStaticExtractions(fallbackKT, uiSelectors, apiContracts);
       return fallbackKT;
     }
@@ -72,16 +71,18 @@ export class KTGenerator {
     existingKT: KTDocument,
     moduleInfo: { name: string; path: string },
     repoPath: string,
-    repoContext: RepoContext
+    metadata: RepoMetadata
   ): Promise<KTDocument> {
     console.log(`[KT] Re-scanning repo to update module "${moduleInfo.name}"`);
-    return this.generateKT(repoContext, repoPath);
+    return this.generateKT(metadata, repoPath);
   }
 
   /**
    * Send collected repo data to Claude for intelligent KT extraction.
    */
-  private async analyzeWithAI(repoContext: RepoContext, scanned: ScannedRepoData): Promise<KTDocument> {
+  private async analyzeWithAI(metadata: RepoMetadata, scanned: ScannedRepoData): Promise<KTDocument> {
+    const techStack = this.inferTechStack(scanned);
+
     const systemPrompt = `You are a senior software architect analyzing a repository to create a Knowledge Transfer (KT) document.
 
 You are given the repository's directory structure and actual source code snippets. Analyze the code to identify:
@@ -89,13 +90,12 @@ You are given the repository's directory structure and actual source code snippe
 2. **API endpoints**: REST/GraphQL endpoints. Look at route definitions, handler functions, API route files. Include the HTTP method, path, and FULL parameter details.
 3. **UI components**: React/Vue/Svelte components. Look at exported components, page components, layouts. Include button details and distinguishing visual factors.
 
-Repository: ${repoContext.fullName}
-Description: ${repoContext.description}
-Tech Stack: ${repoContext.techStack}
-Structure: ${repoContext.structure.slice(0, 30).join(", ")}
+Repository: ${metadata.fullName}
+Description: ${metadata.description}
+Tech Stack: ${techStack}
 
 README (excerpt):
-${repoContext.readmeContent.slice(0, 3000)}
+${metadata.readmeContent.slice(0, 3000)}
 
 Directory tree:
 ${scanned.directoryTree}
@@ -150,13 +150,21 @@ If a category has no items, return an empty array.`;
 
     const text = await this.client.chat({
       system: systemPrompt,
-      message: `Analyze the repository source code and generate a comprehensive KT document for: ${repoContext.fullName}`,
+      message: `Analyze the repository source code and generate a comprehensive KT document for: ${metadata.fullName}`,
       maxTokens: 8192,
     });
 
     console.log(`[KT] Raw AI response (first 500 chars): ${text.slice(0, 500)}`);
     console.log(`[KT] Raw AI response length: ${text.length} chars`);
-    return this.parseKTResponse(text);
+
+    const kt = this.parseKTResponse(text);
+    // Populate metadata fields
+    kt.repoFullName = metadata.fullName;
+    kt.repoName = metadata.name;
+    kt.description = metadata.description;
+    kt.techStack = techStack;
+    kt.readmeContent = metadata.readmeContent;
+    return kt;
   }
 
   /**
@@ -172,6 +180,11 @@ If a category has no items, return an empty array.`;
       const parsed = JSON.parse(jsonStr);
       return {
         generated_at: new Date().toISOString(),
+        repoFullName: "",
+        repoName: "",
+        description: "",
+        techStack: "",
+        readmeContent: "",
         architecture: parsed.architecture || "",
         modules: (parsed.modules || []).map((m: any) => ({
           name: m.name || "",
@@ -203,6 +216,11 @@ If a category has no items, return an empty array.`;
       console.warn(`[KT] Failed to parse AI response as JSON, returning minimal KT`);
       return {
         generated_at: new Date().toISOString(),
+        repoFullName: "",
+        repoName: "",
+        description: "",
+        techStack: "",
+        readmeContent: "",
         architecture: text.slice(0, 2000),
         modules: [],
         apis: [],
@@ -307,15 +325,51 @@ If a category has no items, return an empty array.`;
   }
 
   /**
+   * Infer tech stack from scanned repo data.
+   */
+  private inferTechStack(scanned: ScannedRepoData): string {
+    const all = (scanned.directoryTree + " " + scanned.sourceSnippets).toLowerCase();
+    const hints: string[] = [];
+
+    if (all.includes("package.json")) {
+      if (all.includes("react") || all.includes(".tsx")) hints.push("React");
+      if (all.includes("vue")) hints.push("Vue");
+      if (all.includes("angular")) hints.push("Angular");
+      if (all.includes("next")) hints.push("Next.js");
+      if (all.includes("express")) hints.push("Express");
+      if (all.includes("nestjs")) hints.push("NestJS");
+      if (hints.length === 0) hints.push("Node.js");
+    }
+    if (all.includes("go.mod") || all.includes("go.sum")) hints.push("Go");
+    if (all.includes("cargo.toml")) hints.push("Rust");
+    if (all.includes("requirements.txt") || all.includes("pyproject.toml")) {
+      if (all.includes("fastapi")) hints.push("FastAPI");
+      else if (all.includes("flask")) hints.push("Flask");
+      else if (all.includes("django")) hints.push("Django");
+      else hints.push("Python");
+    }
+    if (all.includes("gemfile")) hints.push("Ruby");
+    if (all.includes("pom.xml") || all.includes("build.gradle")) hints.push("Java");
+
+    return hints.length > 0 ? hints.join(", ") : "Unknown";
+  }
+
+  /**
    * Build minimal KT when AI analysis fails (no scanner data to fall back on).
    */
-  private buildKTFromScan(repoContext: RepoContext, _scanned: ScannedRepoData): KTDocument {
+  private buildKTFromScan(metadata: RepoMetadata, scanned: ScannedRepoData): KTDocument {
+    const techStack = this.inferTechStack(scanned);
     const parts: string[] = [];
-    parts.push(`${repoContext.fullName} is a ${repoContext.techStack} application.`);
-    if (repoContext.description) parts.push(repoContext.description);
+    parts.push(`${metadata.fullName} is a ${techStack} application.`);
+    if (metadata.description) parts.push(metadata.description);
 
     return {
       generated_at: new Date().toISOString(),
+      repoFullName: metadata.fullName,
+      repoName: metadata.name,
+      description: metadata.description,
+      techStack,
+      readmeContent: metadata.readmeContent,
       architecture: parts.join(" "),
       modules: [],
       apis: [],
@@ -326,10 +380,15 @@ If a category has no items, return an empty array.`;
   /**
    * Minimal KT when no clone is available.
    */
-  private buildMinimalKT(repoContext: RepoContext): KTDocument {
+  private buildMinimalKT(metadata: RepoMetadata): KTDocument {
     return {
       generated_at: new Date().toISOString(),
-      architecture: `${repoContext.fullName} is a ${repoContext.techStack} application. ${repoContext.description}`,
+      repoFullName: metadata.fullName,
+      repoName: metadata.name,
+      description: metadata.description,
+      techStack: "Unknown",
+      readmeContent: metadata.readmeContent,
+      architecture: `${metadata.fullName} application. ${metadata.description}`,
       modules: [],
       apis: [],
       ui_components: [],

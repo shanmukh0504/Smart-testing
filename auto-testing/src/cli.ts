@@ -31,10 +31,10 @@ program
     const agent = createAgent(config);
     console.log(chalk.blue("Bootstrapping: fetching repos and analyzing..."));
     await agent.bootstrap();
-    const contexts = agent.getRepoContexts();
-    console.log(chalk.green(`Analyzed ${contexts.length} repos:`));
-    contexts.forEach((c) =>
-      console.log(`  - ${c.fullName} (${c.techStack})`)
+    const repos = agent.getRepoInfos();
+    console.log(chalk.green(`Found ${repos.length} repos:`));
+    repos.forEach((r) =>
+      console.log(`  - ${r.fullName}${r.description ? ` — ${r.description}` : ""}`)
     );
   });
 

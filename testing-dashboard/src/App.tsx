@@ -1081,6 +1081,7 @@ function App() {
                         <tr className="border-b border-[#1e2229]">
                           <th className="text-left py-3 px-3 text-[11px] font-medium text-[#555d6e] uppercase tracking-wider">Status</th>
                           <th className="text-left py-3 px-3 text-[11px] font-medium text-[#555d6e] uppercase tracking-wider">Job</th>
+                          <th className="text-left py-3 px-3 text-[11px] font-medium text-[#555d6e] uppercase tracking-wider">Repo</th>
                           <th className="text-left py-3 px-3 text-[11px] font-medium text-[#555d6e] uppercase tracking-wider">Date</th>
                           <th className="text-left py-3 px-3 text-[11px] font-medium text-[#555d6e] uppercase tracking-wider">Results</th>
                           <th className="text-left py-3 px-3 text-[11px] font-medium text-[#555d6e] uppercase tracking-wider">Duration</th>
@@ -1096,6 +1097,13 @@ function App() {
                             </td>
                             <td className="py-3 px-3">
                               <code className="font-mono text-[11px] text-[#8b92a0] bg-[#0a0c10] px-1.5 py-0.5 rounded">{r.jobId}</code>
+                            </td>
+                            <td className="py-3 px-3">
+                              {r.repo ? (
+                                <span className="text-[12px] text-[#c9cdd4]">{r.repo.split('/').pop()}</span>
+                              ) : (
+                                <span className="text-[11px] text-[#555d6e]">—</span>
+                              )}
                             </td>
                             <td className="py-3 px-3 text-[#8b92a0]">{new Date(r.startTime).toLocaleString()}</td>
                             <td className="py-3 px-3">

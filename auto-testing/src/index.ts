@@ -9,8 +9,7 @@ export type { GitProvider, GitRepo, GitFile, GitProviderType, PullRequest, PRDif
 export { GiteaClient } from "./gitea-client.js";
 export type { GiteaRepo, GiteaFile } from "./gitea-client.js";
 export { GitHubClient } from "./github-client.js";
-export { RepoAnalyzer } from "./repo-analyzer.js";
-export type { RepoContext } from "./repo-analyzer.js";
+export type { RepoMetadata } from "./kt-store.js";
 export { TestGenerator } from "./test-generator.js";
 export type { TestPrompt, GeneratedTest } from "./test-generator.js";
 export { KTGenerator } from "./kt-generator.js";

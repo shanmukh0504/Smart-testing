@@ -210,6 +210,20 @@ export function startServer(port: number = DEFAULT_PORT): void {
     if (isTestRunning()) {
       return json(res, { error: "Tests already running" }, 409);
     }
+    // Auto-detect which test types exist
+    let hasApi = false;
+    let hasUi = false;
+    if (existsSync(GENERATED_TESTS_DIR)) {
+      try {
+        const repos = await readdir(GENERATED_TESTS_DIR);
+        for (const repo of repos) {
+          const files = await readdir(join(GENERATED_TESTS_DIR, repo));
+          if (files.some((f) => f.endsWith(".api.spec.ts"))) hasApi = true;
+          if (files.some((f) => f.endsWith(".ui.spec.ts"))) hasUi = true;
+        }
+      } catch { /* ignore */ }
+    }
+    if (!hasApi && !hasUi) { hasApi = true; hasUi = true; } // fallback: run both
     const jobId = generateJobId();
     json(res, {
       jobId,
@@ -219,8 +233,8 @@ export function startServer(port: number = DEFAULT_PORT): void {
     runTests({
       jobId,
       triggerType: "manual",
-      runApi: true,
-      runUi: true,
+      runApi: hasApi,
+      runUi: hasUi,
     }).catch((err) => console.error("[TEST] Run failed:", err));
   });
 
@@ -243,13 +257,27 @@ export function startServer(port: number = DEFAULT_PORT): void {
     if (isTestRunning()) {
       return json(res, { error: "Tests already running" }, 409);
     }
+    // Auto-detect which test types exist
+    let hasApi = false;
+    let hasUi = false;
+    if (existsSync(GENERATED_TESTS_DIR)) {
+      try {
+        const repos = await readdir(GENERATED_TESTS_DIR);
+        for (const repo of repos) {
+          const files = await readdir(join(GENERATED_TESTS_DIR, repo));
+          if (files.some((f) => f.endsWith(".api.spec.ts"))) hasApi = true;
+          if (files.some((f) => f.endsWith(".ui.spec.ts"))) hasUi = true;
+        }
+      } catch { /* ignore */ }
+    }
+    if (!hasApi && !hasUi) { hasApi = true; hasUi = true; }
     const jobId = generateJobId();
     json(res, { jobId, status: "started", reportUrl: `http://localhost:${serverPort}/report/${jobId}` });
     runTests({
       jobId,
       triggerType: "manual",
-      runApi: true,
-      runUi: true,
+      runApi: hasApi,
+      runUi: hasUi,
     }).catch((err) => console.error("[TEST] Rerun failed:", err));
   });
 
@@ -655,19 +683,38 @@ export function startServer(port: number = DEFAULT_PORT): void {
   const serveReportIndex = async (req: Request, res: Response, jobId?: string) => {
     const baseDir = jobId ? join(REPORT_BASE, jobId) : REPORT_BASE;
     const indexPath = join(baseDir, "index.html");
-    const apiPath = jobId ? join(RESULTS_DIR, jobId, "api-report.json") : join(RESULTS_DIR, "api-report.json");
+    const apiReportPath = jobId ? join(RESULTS_DIR, jobId, "api-report.json") : join(RESULTS_DIR, "api-report.json");
+    const playwrightResultsPath = jobId ? join(RESULTS_DIR, jobId, "results.json") : join(RESULTS_DIR, "results.json");
 
-    if (!existsSync(indexPath) && !existsSync(apiPath)) {
-      res.status(200).type("html").send(`
-        <!DOCTYPE html><html><head><meta charset="utf-8"><title>Report ${jobId || ""}</title></head><body>
-        <h1>No report${jobId ? ` for job ${jobId}` : ""}</h1>
-        <p>Run tests first. Reports available at /report/&lt;jobId&gt;</p>
-        </body></html>
-      `);
-      return;
+    const hasApiReport = existsSync(apiReportPath);
+    const hasPlaywrightHtml = existsSync(indexPath);
+
+    // Check if Playwright had actual tests (not just "No tests found")
+    let playwrightHasTests = false;
+    if (hasPlaywrightHtml && existsSync(playwrightResultsPath)) {
+      try {
+        const results = JSON.parse(await readFile(playwrightResultsPath, "utf-8"));
+        playwrightHasTests = results.suites?.length > 0;
+      } catch { /* treat as no tests */ }
     }
 
-    if (existsSync(indexPath)) {
+    // No reports at all — check run history for summary stats
+    if (!hasApiReport && !hasPlaywrightHtml) {
+      return serveRunSummaryPage(res, jobId);
+    }
+
+    // Playwright exists but empty, no API report — show run summary from history
+    if (!hasApiReport && hasPlaywrightHtml && !playwrightHasTests) {
+      return serveRunSummaryPage(res, jobId);
+    }
+
+    // API-only run (no Playwright tests ran, or Playwright empty)
+    if (hasApiReport && !playwrightHasTests) {
+      return serveApiReportPage(res, apiReportPath, jobId, playwrightHasTests && hasPlaywrightHtml);
+    }
+
+    // Playwright has actual tests - serve Playwright HTML
+    if (hasPlaywrightHtml && playwrightHasTests) {
       let html = await readFile(indexPath, "utf-8");
       const rootHref = "/";
       const fullHref = jobId ? `${rootHref}report/${jobId}/` : `${rootHref}report/`;
@@ -677,7 +724,6 @@ export function startServer(port: number = DEFAULT_PORT): void {
       } else {
         html = html.replace(/<head\s/, `<head ${baseTag} `);
       }
-      // Fix attachment/trace URLs - ensure jobId is in path for data/ and trace/
       if (jobId) {
         html = html.replace(/\/report\/data\//g, `/report/${jobId}/data/`);
         html = html.replace(/\/report\/trace\//g, `/report/${jobId}/trace/`);
@@ -708,6 +754,7 @@ export function startServer(port: number = DEFAULT_PORT): void {
     const relPath = (req.params[1] as string).replace(/\.\./g, "");
     const bases = [
       join(REPORT_BASE, jobId, "data"),
+      join(RESULTS_DIR, jobId, "pw-artifacts"),
       join(RESULTS_DIR, jobId),
     ];
     for (const base of bases) {
@@ -726,6 +773,7 @@ export function startServer(port: number = DEFAULT_PORT): void {
     const bases = [
       join(REPORT_BASE, jobId, "trace"),
       join(REPORT_BASE, jobId, "data"),
+      join(RESULTS_DIR, jobId, "pw-artifacts"),
       join(RESULTS_DIR, jobId),
     ];
     for (const base of bases) {
@@ -749,6 +797,208 @@ export function startServer(port: number = DEFAULT_PORT): void {
     const data = await readFile(apiPath, "utf-8");
     res.type("json").send(data);
   });
+
+  async function serveApiReportPage(res: Response, apiReportPath: string, jobId?: string, hasPlaywrightLink?: boolean) {
+    let report: any;
+    try {
+      report = JSON.parse(await readFile(apiReportPath, "utf-8"));
+    } catch {
+      return serveReportPage(res, jobId);
+    }
+
+    const totalTests = report.numTotalTests ?? 0;
+    const passed = report.numPassedTests ?? 0;
+    const failed = report.numFailedTests ?? 0;
+    const skipped = report.numPendingTests ?? 0;
+    const totalSuites = report.numTotalTestSuites ?? 0;
+    const passedSuites = report.numPassedTestSuites ?? 0;
+    const failedSuites = report.numFailedTestSuites ?? 0;
+    const duration = report.testResults?.reduce((sum: number, r: any) => sum + ((r.endTime || 0) - (r.startTime || 0)), 0) || 0;
+    const durationStr = duration > 0 ? `${(duration / 1000).toFixed(1)}s` : '--';
+    const passRate = totalTests > 0 ? ((passed / totalTests) * 100).toFixed(1) : '0';
+
+    // Build test file rows
+    const fileRows = (report.testResults || []).map((file: any) => {
+      const fileName = (file.name || '').split('/').pop() || file.name;
+      const fileStatus = file.status === 'passed' ? 'passed' : 'failed';
+      const assertions = file.assertionResults || [];
+      const filePassed = assertions.filter((a: any) => a.status === 'passed').length;
+      const fileFailed = assertions.filter((a: any) => a.status === 'failed').length;
+
+      const testRows = assertions.map((a: any) => {
+        const ancestors = (a.ancestorTitles || []).join(' > ');
+        const label = ancestors ? `${ancestors} > ${a.title}` : a.title;
+        const statusIcon = a.status === 'passed' ? '&#10003;' : '&#10007;';
+        const statusColor = a.status === 'passed' ? '#4ade80' : '#f87171';
+        const dMs = a.duration || 0;
+        const failMsg = a.status === 'failed' && a.failureMessages?.length
+          ? `<pre class="fail-msg">${escapeHtml(a.failureMessages.join('\n')).slice(0, 2000)}</pre>`
+          : '';
+        return `<tr class="test-row ${a.status}">
+          <td class="test-status" style="color:${statusColor}">${statusIcon}</td>
+          <td class="test-name">${escapeHtml(label)}</td>
+          <td class="test-dur">${dMs}ms</td>
+        </tr>${failMsg ? `<tr class="fail-row"><td colspan="3">${failMsg}</td></tr>` : ''}`;
+      }).join('');
+
+      const statusBadge = fileStatus === 'passed'
+        ? '<span class="badge pass">PASS</span>'
+        : '<span class="badge fail">FAIL</span>';
+
+      return `<div class="file-section">
+        <div class="file-header" onclick="this.parentElement.classList.toggle('open')">
+          ${statusBadge}
+          <span class="file-name">${escapeHtml(fileName)}</span>
+          <span class="file-stats">
+            <span class="stat-pass">${filePassed} passed</span>
+            ${fileFailed > 0 ? `<span class="stat-fail">${fileFailed} failed</span>` : ''}
+          </span>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <table class="test-table">${testRows}</table>
+      </div>`;
+    }).join('');
+
+    const playwrightLink = hasPlaywrightLink && jobId
+      ? `<a href="/report/${jobId}/" class="link-btn">View Playwright Report</a>` : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Test Report${jobId ? ` — ${jobId}` : ''}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0d11; color: #c9cdd4; min-height: 100vh; }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
+  h1 { font-size: 20px; font-weight: 600; color: #e1e3e6; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #555d6e; margin-bottom: 24px; }
+  .subtitle code { background: #181b22; padding: 2px 8px; border-radius: 4px; font-size: 11px; color: #8b92a0; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .stat-card { background: #12151b; border: 1px solid #1e2229; border-radius: 10px; padding: 16px; }
+  .stat-card .label { font-size: 11px; color: #555d6e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .stat-card .value { font-size: 26px; font-weight: 700; }
+  .stat-card .value.pass { color: #4ade80; }
+  .stat-card .value.fail { color: #f87171; }
+  .stat-card .value.total { color: #e1e3e6; }
+  .stat-card .value.skip { color: #facc15; }
+  .stat-card .value.rate { color: #60a5fa; }
+  .stat-card .value.time { color: #c084fc; }
+  .bar { height: 6px; background: #1e2229; border-radius: 3px; overflow: hidden; margin-bottom: 28px; display: flex; }
+  .bar .pass-bar { background: #4ade80; }
+  .bar .fail-bar { background: #f87171; }
+  .bar .skip-bar { background: #facc15; }
+  .file-section { background: #12151b; border: 1px solid #1e2229; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+  .file-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; user-select: none; }
+  .file-header:hover { background: #181b22; }
+  .file-name { font-size: 13px; font-weight: 500; color: #e1e3e6; flex: 1; }
+  .file-stats { font-size: 12px; display: flex; gap: 10px; }
+  .stat-pass { color: #4ade80; }
+  .stat-fail { color: #f87171; }
+  .chevron { font-size: 10px; color: #555d6e; transition: transform 0.2s; }
+  .file-section.open .chevron { transform: rotate(180deg); }
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge.pass { background: #4ade8020; color: #4ade80; }
+  .badge.fail { background: #f8717120; color: #f87171; }
+  .test-table { width: 100%; border-collapse: collapse; display: none; }
+  .file-section.open .test-table { display: table; }
+  .test-row td { padding: 8px 16px; font-size: 12px; border-top: 1px solid #1e222920; }
+  .test-status { width: 28px; text-align: center; font-size: 14px; }
+  .test-name { color: #c9cdd4; }
+  .test-dur { width: 70px; text-align: right; color: #555d6e; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .fail-row td { padding: 0 16px 12px; }
+  .fail-msg { background: #f8717110; border: 1px solid #f8717130; border-radius: 6px; padding: 10px 14px; font-size: 11px; color: #f87171; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; font-family: 'SF Mono', Menlo, monospace; }
+  .link-btn { display: inline-block; margin-top: 20px; padding: 8px 16px; background: #1e2229; border: 1px solid #2a2f38; border-radius: 6px; color: #60a5fa; text-decoration: none; font-size: 13px; }
+  .link-btn:hover { background: #252a34; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>API Test Report</h1>
+  <p class="subtitle">${jobId ? `<code>${jobId}</code> &middot; ` : ''}${totalSuites} test files &middot; ${totalTests} tests &middot; ${durationStr}</p>
+
+  <div class="stats">
+    <div class="stat-card"><div class="label">Total</div><div class="value total">${totalTests}</div></div>
+    <div class="stat-card"><div class="label">Passed</div><div class="value pass">${passed}</div></div>
+    <div class="stat-card"><div class="label">Failed</div><div class="value fail">${failed}</div></div>
+    <div class="stat-card"><div class="label">Skipped</div><div class="value skip">${skipped}</div></div>
+    <div class="stat-card"><div class="label">Pass Rate</div><div class="value rate">${passRate}%</div></div>
+    <div class="stat-card"><div class="label">Duration</div><div class="value time">${durationStr}</div></div>
+  </div>
+
+  <div class="bar">
+    <div class="pass-bar" style="width:${totalTests > 0 ? (passed / totalTests) * 100 : 0}%"></div>
+    <div class="fail-bar" style="width:${totalTests > 0 ? (failed / totalTests) * 100 : 0}%"></div>
+    <div class="skip-bar" style="width:${totalTests > 0 ? (skipped / totalTests) * 100 : 0}%"></div>
+  </div>
+
+  ${fileRows}
+  ${playwrightLink}
+</div>
+</body>
+</html>`;
+    res.status(200).type("html").send(html);
+  }
+
+  async function serveRunSummaryPage(res: Response, jobId?: string) {
+    // Try to get stats from run history
+    const history = await loadRunHistory();
+    const run = jobId ? history.find((r) => r.jobId === jobId) : history[0];
+
+    if (!run || (run.total === 0 && run.passed === 0 && run.failed === 0)) {
+      res.status(200).type("html").send(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Report ${jobId || ""}</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b0d11;color:#c9cdd4;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;}
+h1{font-size:20px;color:#e1e3e6;margin-bottom:8px;} p{color:#555d6e;font-size:14px;} code{background:#181b22;padding:2px 8px;border-radius:4px;font-size:12px;color:#8b92a0;}</style>
+</head><body><div><h1>No report available</h1><p>${jobId ? `Job <code>${jobId}</code> — ` : ''}Run tests first to generate a report.</p></div></body></html>`);
+      return;
+    }
+
+    const passed = run.passed ?? 0;
+    const failed = run.failed ?? 0;
+    const total = run.total ?? 0;
+    const skipped = run.skipped ?? 0;
+    const durationStr = run.duration ? `${(run.duration / 1000).toFixed(1)}s` : '--';
+    const passRate = total > 0 ? ((passed / total) * 100).toFixed(1) : '0';
+    const statusColor = run.status === 'passed' ? '#4ade80' : run.status === 'failed' ? '#f87171' : '#facc15';
+
+    res.status(200).type("html").send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Test Run Summary — ${jobId || ''}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b0d11;color:#c9cdd4;min-height:100vh;}
+.c{max-width:640px;margin:0 auto;padding:48px 24px;}.h1{font-size:20px;font-weight:600;color:#e1e3e6;margin-bottom:4px;}
+.sub{font-size:13px;color:#555d6e;margin-bottom:28px;}.sub code{background:#181b22;padding:2px 8px;border-radius:4px;font-size:11px;color:#8b92a0;}
+.status{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;text-transform:uppercase;background:${statusColor}20;color:${statusColor};margin-bottom:20px;}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
+.s{background:#12151b;border:1px solid #1e2229;border-radius:10px;padding:16px;text-align:center;}
+.s .l{font-size:11px;color:#555d6e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.s .v{font-size:28px;font-weight:700;}
+.pass{color:#4ade80;}.fail{color:#f87171;}.skip{color:#facc15;}.tot{color:#e1e3e6;}.rate{color:#60a5fa;}.time{color:#c084fc;}
+.bar{height:6px;background:#1e2229;border-radius:3px;overflow:hidden;display:flex;margin-bottom:20px;}
+.bar .bp{background:#4ade80;}.bar .bf{background:#f87171;}.bar .bs{background:#facc15;}
+.note{font-size:12px;color:#555d6e;margin-top:16px;padding:12px;background:#12151b;border:1px solid #1e2229;border-radius:8px;}
+</style></head><body><div class="c">
+<h1 class="h1">Test Run Summary</h1>
+<p class="sub"><code>${jobId || 'unknown'}</code> &middot; ${run.startTime ? new Date(run.startTime).toLocaleString() : ''} &middot; ${durationStr}</p>
+<div class="status">${run.status}</div>
+<div class="stats">
+  <div class="s"><div class="l">Passed</div><div class="v pass">${passed}</div></div>
+  <div class="s"><div class="l">Failed</div><div class="v fail">${failed}</div></div>
+  <div class="s"><div class="l">Total</div><div class="v tot">${total}</div></div>
+</div>
+<div class="bar">
+  <div class="bp" style="width:${total > 0 ? (passed / total) * 100 : 0}%"></div>
+  <div class="bf" style="width:${total > 0 ? (failed / total) * 100 : 0}%"></div>
+  <div class="bs" style="width:${total > 0 ? (skipped / total) * 100 : 0}%"></div>
+</div>
+<div class="note">Detailed test report (api-report.json) was not preserved for this run. Future runs will show full per-test results here.${run.repo ? ` Repo: <strong>${run.repo}</strong>` : ''}</div>
+</div></body></html>`);
+  }
+
+  function escapeHtml(str: string): string {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 
   async function serveReportPage(res: Response, jobId?: string) {
     const apiPath = jobId ? join(RESULTS_DIR, jobId, "api-report.json") : join(RESULTS_DIR, "api-report.json");

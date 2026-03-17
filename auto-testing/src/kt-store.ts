@@ -90,10 +90,28 @@ export interface RepoSettings {
 
 export interface KTDocument {
   generated_at: string;
+  /** Repository full name (owner/repo) */
+  repoFullName: string;
+  /** Repository short name */
+  repoName: string;
+  /** Repository description */
+  description: string;
+  /** Inferred tech stack (e.g. "React, Express") */
+  techStack: string;
+  /** Full README content */
+  readmeContent: string;
   architecture: string;
   modules: KTModule[];
   apis: KTApi[];
   ui_components: KTUIComponent[];
+}
+
+/** Lightweight repo metadata used as input for KT generation */
+export interface RepoMetadata {
+  fullName: string;
+  name: string;
+  description: string;
+  readmeContent: string;
 }
 
 export interface KTTestSuite {

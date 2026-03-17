@@ -1,10 +1,10 @@
 /**
  * AI-powered test generator using Claude.
  * KT-aware: uses Knowledge Transfer documents for richer, targeted test generation.
+ * All repo context comes from the KT document — no separate RepoContext needed.
  */
 
 import type { ClaudeClient } from "./claude-client.js";
-import type { RepoContext } from "./repo-analyzer.js";
 import type { KTDocument } from "./kt-store.js";
 
 export interface TestPrompt {
@@ -89,48 +89,45 @@ export class TestGenerator {
   // ─── Frontend Tests ─────────────────────────────────────────
 
   async generateFrontendTests(
-    prompt: TestPrompt,
-    repoContext: RepoContext
+    prompt: TestPrompt
   ): Promise<GeneratedTest[]> {
-    const ktContext = this.buildKTContext(prompt.kt);
-    const sourceContext = repoContext.sourceSnippets
-      ? `\nSource Code Snippets:\n${repoContext.sourceSnippets.slice(0, 3000)}`
-      : "";
+    const kt = prompt.kt;
+    const ktContext = this.buildKTContext(kt);
     const secretsContext = prompt.secretsAndParams
       ? `\n## Secrets, Params & Auth for Tests\nUse these values in the generated tests where applicable:\n${prompt.secretsAndParams}`
       : "";
 
+    const repoName = kt?.repoName || "unknown";
+    const repoFullName = kt?.repoFullName || "unknown";
+    const description = kt?.description || "N/A";
+    const techStack = kt?.techStack || "Unknown";
+    const readmeContent = kt?.readmeContent || "";
+
     const systemPrompt = `You are a senior QA automation engineer. Your job is to generate production-quality Playwright UI tests for ANY web application.
 
 ## Repository Information
-- Name: ${repoContext.name} (${repoContext.fullName})
-- Description: ${repoContext.description || "N/A"}
-- Tech Stack: ${repoContext.techStack}
+- Name: ${repoName} (${repoFullName})
+- Description: ${description}
+- Tech Stack: ${techStack}
 - Target URL: ${prompt.url}
 
 ## Product Context
-${repoContext.readmeContent.slice(0, 4000)}
+${readmeContent.slice(0, 4000)}
 ${ktContext}
-${sourceContext}
 ${secretsContext}
 
 ## Your Task
-Generate comprehensive Playwright tests covering the entire application. Use the KT document (if provided) to understand:
-- What pages and components exist and how they work
-- The user flows and interactions to test
-- Edge cases specific to this application's domain
+Generate MINIMAL but HIGH-COVERAGE Playwright UI tests. Use the KT document to understand what pages and components exist.
 
-Cover these categories where applicable:
-- Critical user flows (signup, login, core feature usage, checkout, etc.)
-- Page loads and rendering of key content
-- Navigation between pages/views
-- Form interactions (input, validation, submission, error display)
-- Interactive elements (modals, dropdowns, tabs, accordions, tooltips)
-- Data display (tables, lists, charts — verify they render with content)
-- Error states and empty states
-- Loading states and skeleton screens
-- Responsive behavior at key breakpoints
-- Accessibility (focus management, ARIA labels, keyboard navigation)
+## Test Strategy — Be Efficient
+Do NOT write redundant tests. Each test should verify something DIFFERENT. Aim for MAXIMUM coverage with MINIMUM test count.
+
+For each page/feature, write:
+1. **Happy path** (1-2 tests) — page loads, key elements render, primary user flow works
+2. **Failure/error state** (1 test) — invalid input, empty state, or error boundary
+3. **Navigation** (1 test only for the whole app) — verify key routes are reachable
+
+Do NOT test the same element twice. Do NOT write separate tests for "page loads" and "content renders" — combine them into one.
 
 ## Rules
 1. Use \`@playwright/test\` — import { test, expect } from '@playwright/test'
@@ -173,53 +170,48 @@ Filenames MUST end with \`.ui.spec.ts\`. Use descriptive filenames based on the 
 
   async generateBackendTests(
     prompt: TestPrompt,
-    repoContext: RepoContext,
     apiBaseUrl: string
   ): Promise<GeneratedTest[]> {
-    const ktContext = this.buildKTContext(prompt.kt);
-    const apiDocsText = repoContext.apiDocs
-      .map((d) => `### ${d.filePath}\n${d.content}`)
-      .join("\n\n");
-    const sourceContext = repoContext.sourceSnippets
-      ? `\nSource Code (routes, handlers, controllers):\n${repoContext.sourceSnippets.slice(0, 5000)}`
-      : "";
+    const kt = prompt.kt;
+    const ktContext = this.buildKTContext(kt);
     const secretsContext = prompt.secretsAndParams
       ? `\n## Secrets, Params & Auth for Tests\nUse these EXACT values in the generated tests for authentication, headers, query params, body fields, or any other configuration:\n${prompt.secretsAndParams}`
       : "";
 
+    const repoName = kt?.repoName || "unknown";
+    const repoFullName = kt?.repoFullName || "unknown";
+    const description = kt?.description || "N/A";
+    const techStack = kt?.techStack || "Unknown";
+    const readmeContent = kt?.readmeContent || "";
+
     const systemPrompt = `You are a senior API test engineer. Your job is to generate production-quality API tests for ANY backend service using Vitest.
 
 ## Repository Information
-- Name: ${repoContext.name} (${repoContext.fullName})
-- Description: ${repoContext.description || "N/A"}
-- Tech Stack: ${repoContext.techStack}
+- Name: ${repoName} (${repoFullName})
+- Description: ${description}
+- Tech Stack: ${techStack}
 - API Base URL: ${apiBaseUrl}
 
 ## Product Context
-${repoContext.readmeContent.slice(0, 3000)}
-
-## API Documentation
-${apiDocsText.slice(0, 6000)}
+${readmeContent.slice(0, 3000)}
 ${ktContext}
-${sourceContext}
 ${secretsContext}
 
 ## Your Task
-Generate comprehensive API tests. Use the KT document (if provided) to understand:
+Generate MINIMAL but HIGH-COVERAGE API tests. Use the KT document (if provided) to understand:
 - What endpoints exist, their HTTP methods, and what they do
 - The expected request/response formats
-- Business logic and validation rules
 - Authentication requirements
-- Error scenarios specific to this API
 
-For EACH endpoint discovered (from KT, docs, or source code), generate tests covering:
-1. **Happy path** — valid request returns expected status and response shape
-2. **Response schema validation** — verify all expected fields exist and have correct types
-3. **Input validation** — missing required fields, invalid types, boundary values
-4. **Error responses** — 400 (bad request), 401 (unauthorized), 404 (not found), 422 (validation)
-5. **Edge cases** — empty strings, special characters, extremely large values, concurrent requests
-6. **Query parameters** — test pagination, filtering, sorting if applicable
-7. **Content negotiation** — verify Content-Type headers
+## Test Strategy — Be Efficient
+Do NOT write redundant tests. Each test should verify something DIFFERENT. Aim for MAXIMUM coverage with MINIMUM test count.
+
+For EACH endpoint, write exactly these tests (no more, no less):
+1. **Happy path** (1 test) — valid request with correct params returns expected status and response shape
+2. **Failure path** (1-2 tests) — invalid input (missing required param, wrong type) returns appropriate error status
+3. **Edge case** (1 test) — boundary condition specific to this endpoint (empty string, special chars, or missing auth)
+
+That's 3-4 tests per endpoint. Do NOT write separate tests for things that can be checked in one test (e.g. check both status code AND response shape in the same happy path test).
 
 ## Rules
 1. Use \`vitest\` — import { describe, it, expect } from 'vitest'
@@ -282,7 +274,6 @@ Filenames MUST end with \`.api.spec.ts\`. Use descriptive filenames based on the
 
   async generateAdditionalTests(
     userPrompt: string,
-    repoContext: RepoContext,
     existingTestsContent: string,
     type: "frontend" | "backend",
     apiBaseUrl?: string,
@@ -297,6 +288,7 @@ Filenames MUST end with \`.api.spec.ts\`. Use descriptive filenames based on the
     const endpointHint = options?.endpoint ? `\nTarget endpoint: ${options.endpoint}` : "";
     const sampleHint = options?.sampleReq ? `\nSample request/response:\n${JSON.stringify(options.sampleReq, null, 2)}` : "";
     const secretsHint = options?.secretsAndParams ? `\nSecrets, params & auth to use in tests:\n${options.secretsAndParams}` : "";
+    const repoName = options?.kt?.repoName || "unknown";
 
     const systemPrompt = `You are a senior QA engineer adding new test cases to an existing test suite.
 
@@ -305,7 +297,7 @@ Filenames MUST end with \`.api.spec.ts\`. Use descriptive filenames based on the
 ${existingTestsContent.slice(0, 8000)}
 \`\`\`
 
-## Repository: ${repoContext.name}
+## Repository: ${repoName}
 ${ktContext}
 
 ## User Request
@@ -344,7 +336,6 @@ Return ONLY a JSON object:
 
   async generatePRTests(
     prompt: TestPrompt,
-    repoContext: RepoContext,
     diffContext: string,
     kt: KTDocument,
     type: "frontend" | "backend",
@@ -353,14 +344,18 @@ Return ONLY a JSON object:
   ): Promise<GeneratedTest[]> {
     const ktContext = this.buildKTContext(kt);
 
+    const repoName = kt.repoName || "unknown";
+    const repoFullName = kt.repoFullName || "unknown";
+    const techStack = kt.techStack || "Unknown";
+
     const systemPrompt = `You are a senior QA engineer reviewing a Pull Request and generating targeted tests for the changed code.
 
 ## PR Information
 - Title: ${prInfo.title}
 - Branch: ${prInfo.headBranch} → ${prInfo.baseBranch}
 
-## Repository: ${repoContext.name} (${repoContext.fullName})
-- Tech Stack: ${repoContext.techStack}
+## Repository: ${repoName} (${repoFullName})
+- Tech Stack: ${techStack}
 - ${type === "backend" ? `API Base URL: ${baseUrl}` : `UI URL: ${baseUrl}`}
 
 ## KT Document (understand the full system before writing tests)

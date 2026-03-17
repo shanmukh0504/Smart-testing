@@ -26,7 +26,7 @@ export default defineConfig({
     ],
     ["json", { outputFile: path.join(OUTPUT_DIR, "results.json") }],
   ],
-  outputDir: OUTPUT_DIR,
+  outputDir: path.join(OUTPUT_DIR, "pw-artifacts"),
   use: {
     baseURL: process.env.BASE_URL || "http://localhost:3000",
     trace: "on",
